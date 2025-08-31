@@ -30,6 +30,6 @@ export function ensureConfiguration(
   return {
     systemPromptTemplate:
       configurable.systemPromptTemplate ?? SYSTEM_PROMPT_TEMPLATE,
-    model: configurable.model ?? "openai/Qwen/Qwen3-32B",
+    model: configurable.model ?? "openai/deepseek-ai/DeepSeek-R1",
   };
 }
