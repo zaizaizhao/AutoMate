@@ -105,8 +105,16 @@ class JsonWriterServer {
         throw new Error('data is required');
       }
 
-      // Ensure the file path is absolute
-      const absolutePath = path.resolve(filePath);
+      // Handle file path resolution safely
+      // If path starts with '/', treat it as relative to current working directory
+      // to avoid writing to system root directory
+      let resolvedPath = filePath;
+      if (filePath.startsWith('/')) {
+        resolvedPath = filePath.substring(1); // Remove leading slash
+      }
+      
+      // Ensure the file path is absolute, relative to current working directory
+      const absolutePath = path.resolve(process.cwd(), resolvedPath);
       
       // Create directories if needed
       if (createDirectories) {

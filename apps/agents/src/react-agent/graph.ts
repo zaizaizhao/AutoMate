@@ -14,6 +14,8 @@ async function callModel(
 ): Promise<typeof MessagesAnnotation.Update> {
   const configuration = ensureConfiguration(config);
   const tools = await getTools();
+  console.log("Available tools:", tools);
+  
 
   const model = (await loadChatModel(configuration.model)).bindTools(tools);
   const response = await model.invoke([

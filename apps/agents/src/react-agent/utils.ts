@@ -8,7 +8,6 @@ export async function loadChatModel(
   fullySpecifiedName: string,
 ): Promise<ReturnType<typeof initChatModel>> {
   console.log(fullySpecifiedName);
-  
   const index = fullySpecifiedName.indexOf("/");
   if (index === -1) {
     // If there's no "/", assume it's just the model
@@ -17,15 +16,21 @@ export async function loadChatModel(
     const provider = fullySpecifiedName.slice(0, index);
     const model = fullySpecifiedName.slice(index + 1);
     console.log("this is provider and model",provider,model);
-    
+    console.log("this is openai api base url",process.env.OPENAI_API_BASE_URL);
+    console.log("this is openai api key",process.env.OPENAI_API_KEY);
     // Handle different providers
   if (provider === "openai") {
-      return await initChatModel(model, {
-        modelProvider: "openai", // Local models are usually OpenAI-compatible
-        baseURL: process.env.OPENAI_API_BASE_URL,
-        apiKey: process.env.OPENAI_API_KEY || "dummy-key",
+    console.log("进入openai初始化");
+    console.log("this is openai api base url",process.env.OPENAI_API_BASE_URL);
+    console.log("this is openai api key",process.env.OPENAI_API_KEY);
+      return await initChatModel(model,{
+        modelProvider: "openai",
+        configuration: {
+          baseURL: process.env.OPENAI_API_BASE_URL,
+        },
       });
     } else {
+      console.log("进入其他模型初始化");
       return await initChatModel(model, {
         modelProvider: provider,
       });
