@@ -15,15 +15,15 @@ export async function loadChatModel(
   } else {
     const provider = fullySpecifiedName.slice(0, index);
     const model = fullySpecifiedName.slice(index + 1);
-    console.log("this is provider and model",provider,model);
-    console.log("this is openai api base url",process.env.OPENAI_API_BASE_URL);
-    console.log("this is openai api key",process.env.OPENAI_API_KEY);
+    console.log("this is provider and model", provider, model);
+    console.log("this is openai api base url", process.env.OPENAI_API_BASE_URL);
+    console.log("this is openai api key", process.env.OPENAI_API_KEY);
     // Handle different providers
-  if (provider === "openai") {
-    console.log("进入openai初始化");
-    console.log("this is openai api base url",process.env.OPENAI_API_BASE_URL);
-    console.log("this is openai api key",process.env.OPENAI_API_KEY);
-      return await initChatModel(model,{
+    if (provider === "openai") {
+      console.log("进入openai初始化");
+      console.log("this is openai api base url", process.env.OPENAI_API_BASE_URL);
+      console.log("this is openai api key", process.env.OPENAI_API_KEY);
+      return await initChatModel(model, {
         modelProvider: "openai",
         configuration: {
           baseURL: process.env.OPENAI_API_BASE_URL,
@@ -32,6 +32,9 @@ export async function loadChatModel(
     } else {
       console.log("进入其他模型初始化");
       return await initChatModel(model, {
+        modelKwargs: {
+          stream_options: { include_usage: false }
+        },
         modelProvider: provider,
       });
     }

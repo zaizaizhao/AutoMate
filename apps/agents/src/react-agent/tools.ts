@@ -25,7 +25,7 @@ const client = new MultiServerMCPClient({
 /**
  * Get tools from MCP client asynchronously
  */
-export async function getTools() {
+export async function getTestServerToolsgetTools() {
   return await client.getTools();
 }
 
