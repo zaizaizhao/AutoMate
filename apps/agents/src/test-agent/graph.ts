@@ -77,7 +77,7 @@ export async function generateGraph(){
 const graphPromise = (await generateGraph()).compile({
     interruptBefore: [], // if you want to update the state before calling the tools
     interruptAfter: [],
-  });
+  })  ;
 
 // Export graph that's initialized at startup
 export const graph = await graphPromise;
