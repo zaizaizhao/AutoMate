@@ -4,18 +4,22 @@ import { Command, MessagesAnnotation } from "@langchain/langgraph";
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { MemoryNamespace, SharedMemoryManager } from '../Memory/SharedMemoryManager.js';
+import { initChatModel } from 'langchain/chat_models/universal';
+import { ConfigurableChatModelCallOptions, ConfigurableModel } from 'langchain/chat_models/universal';
+import { BaseLanguageModelInput } from '@langchain/core/language_models/base';
+import { ConfigurationSchema } from '../ModelUtils/Config.js';
 
 export interface AgentConfig {
   agentId: string;
   agentType: string;
   namespace: MemoryNamespace;
-  llm: ChatOpenAI;
+  llm: ConfigurableModel<BaseLanguageModelInput, ConfigurableChatModelCallOptions>;
   memoryManager: SharedMemoryManager;
 }
 
 export abstract class BaseAgent {
   protected config: AgentConfig;
-  protected graph: StateGraph<typeof MessagesAnnotation.State>;
+  protected graph: StateGraph<typeof MessagesAnnotation.State,typeof ConfigurationSchema.State>;
   protected memoryManager: SharedMemoryManager;
 
   constructor(config: AgentConfig) {
@@ -24,7 +28,7 @@ export abstract class BaseAgent {
     this.graph = this.buildGraph();
   }
 
-  protected abstract buildGraph(): StateGraph<typeof MessagesAnnotation.State>;
+  protected abstract buildGraph(): StateGraph<typeof MessagesAnnotation.State,typeof ConfigurationSchema.State>;
 
   // 保存记忆到共享存储
   protected async saveSharedMemory(
