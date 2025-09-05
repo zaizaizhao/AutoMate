@@ -29,7 +29,6 @@ export async function ToolMessageExtract(
 ): Promise<Command> {
   const configuration = ensureConfiguration(config);
   const tools = await getTestServerTools();
-  console.log("Available tools:", tools);
 
   const model = (await loadChatModel(configuration.model)).bindTools(tools);
   const maxRetries = 3;
@@ -131,8 +130,9 @@ export async function ToolMessageExtract(
   }
   
   return new Command({
+    // 只传递最新的消息
     update: {
-      messages: [...state.messages, response],
+      messages: [response],
     },
     goto: "write-to-json",
   })

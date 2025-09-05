@@ -2,7 +2,6 @@
  * Define the configurable parameters for the agent.
  */
 import { Annotation } from "@langchain/langgraph";
-import { SYSTEM_PROMPT_TEMPLATE } from "./prompts.js";
 import { RunnableConfig } from "@langchain/core/runnables";
 
 export const ConfigurationSchema = Annotation.Root({
@@ -19,7 +18,7 @@ export const ConfigurationSchema = Annotation.Root({
 
 export function ensureConfiguration(
   config: RunnableConfig,
-  
+  prompt: string,
 ): typeof ConfigurationSchema.State {
   /**
    * Ensure the defaults are populated.
@@ -27,7 +26,7 @@ export function ensureConfiguration(
   const configurable = config.configurable ?? {};
   return {
     systemPromptTemplate:
-    configurable.systemPromptTemplate ?? SYSTEM_PROMPT_TEMPLATE,
+    configurable.systemPromptTemplate ?? prompt,
     model: configurable.model ?? "openai/deepseek-ai/DeepSeek-V3",
   };
 }

@@ -11,12 +11,21 @@ importers:
 
   .:
     dependencies:
+      '@langchain/langgraph-checkpoint-postgres':
+        specifier: ^0.1.2
+        version: 0.1.2(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))(@langchain/langgraph-checkpoint@0.0.18(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))
       '@langchain/mcp-adapters':
         specifier: ^0.6.0
         version: 0.6.0(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))
       '@modelcontextprotocol/sdk':
         specifier: ^1.17.4
         version: 1.17.4
+      '@types/pg':
+        specifier: ^8.15.5
+        version: 8.15.5
+      pg:
+        specifier: ^8.16.3
+        version: 8.16.3
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.3.0
@@ -74,7 +83,7 @@ importers:
         version: 0.3.4(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))
       '@langchain/community':
         specifier: ^0.3.35
-        version: 0.3.53(@aws-crypto/sha256-js@5.2.0)(@aws-sdk/credential-provider-node@3.879.0)(@browserbasehq/sdk@2.6.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.55.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(zod@3.25.76))(@elastic/elasticsearch@8.19.1)(@ibm-cloud/watsonx-ai@1.6.12)(@langchain/anthropic@0.3.26(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/cohere@0.3.4(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))(@opentelemetry/api@1.9.0)(@pinecone-database/pinecone@5.1.2)(@smithy/util-utf8@2.3.0)(axios@1.11.0)(cohere-ai@7.18.1)(fast-xml-parser@5.2.5)(ibm-cloud-sdk-core@5.4.2)(ignore@5.3.2)(jsonwebtoken@9.0.2)(lodash@4.17.21)(mongodb@6.19.0(@aws-sdk/credential-providers@3.879.0))(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(playwright@1.55.0)(weaviate-client@3.8.1)(ws@8.18.3)
+        version: 0.3.53(@aws-crypto/sha256-js@5.2.0)(@aws-sdk/credential-provider-node@3.879.0)(@browserbasehq/sdk@2.6.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.55.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(zod@3.25.76))(@elastic/elasticsearch@8.19.1)(@ibm-cloud/watsonx-ai@1.6.12)(@langchain/anthropic@0.3.26(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/cohere@0.3.4(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))(@opentelemetry/api@1.9.0)(@pinecone-database/pinecone@5.1.2)(@smithy/util-utf8@2.3.0)(axios@1.11.0)(cohere-ai@7.18.1)(fast-xml-parser@5.2.5)(ibm-cloud-sdk-core@5.4.2)(ignore@5.3.2)(jsonwebtoken@9.0.2)(lodash@4.17.21)(mongodb@6.19.0(@aws-sdk/credential-providers@3.879.0))(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(pg@8.16.3)(playwright@1.55.0)(weaviate-client@3.8.1)(ws@8.18.3)
       '@langchain/core':
         specifier: ^0.3.42
         version: 0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))
@@ -1432,6 +1441,13 @@ packages:
       '@langchain/langgraph-checkpoint': ^0.0.15
       typescript: ^5.5.4
 
+  '@langchain/langgraph-checkpoint-postgres@0.1.2':
+    resolution: {integrity: sha512-0Utktn8jzuAXN5iagIkdRD0O159G9iXoauqO1P1xttpov1MOgHMyMXh17mqt/FrZr6Fi/5LqSTxvbjod5doCHw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@langchain/core': ^0.3.42
+      '@langchain/langgraph-checkpoint': ^0.1.0
+
   '@langchain/langgraph-checkpoint@0.0.16':
     resolution: {integrity: sha512-B50l7w9o9353drHsdsD01vhQrCJw0eqvYeXid7oKeoj1Yye+qY90r97xuhiflaYCZHM5VEo2oaizs8oknerZsQ==}
     engines: {node: '>=18'}
@@ -2404,6 +2420,9 @@ packages:
 
   '@types/node@24.3.0':
     resolution: {integrity: sha512-aPTXCrfwnDLj4VvXrm+UUCQjNEvJgNA8s5F1cvwQU+3KNltTOkBm1j30uNLyqqPNe7gE3KFzImYoZEfLhp4Yow==}
+
+  '@types/pg@8.15.5':
+    resolution: {integrity: sha512-LF7lF6zWEKxuT3/OR8wAZGzkg4ENGXFNyiV/JeOt9z5B+0ZVwbql9McqX5c/WStFq1GaGso7H1AzP/qSzmlCKQ==}
 
   '@types/prismjs@1.26.5':
     resolution: {integrity: sha512-AUZTa7hQ2KY5L7AmtSiqxlhWxb4ina0yd8hNbl4TWuqnv/pFP0nDMb3YrfSBf4hJVGLh2YEIBfKaBW/9UEl6IQ==}
@@ -4759,6 +4778,40 @@ packages:
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
 
+  pg-cloudflare@1.2.7:
+    resolution: {integrity: sha512-YgCtzMH0ptvZJslLM1ffsY4EuGaU0cx4XSdXLRFae8bPP4dS5xL1tNB3k2o/N64cHJpwU7dxKli/nZ2lUa5fLg==}
+
+  pg-connection-string@2.9.1:
+    resolution: {integrity: sha512-nkc6NpDcvPVpZXxrreI/FOtX3XemeLl8E0qFr6F2Lrm/I8WOnaWNhIPK2Z7OHpw7gh5XJThi6j6ppgNoaT1w4w==}
+
+  pg-int8@1.0.1:
+    resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
+    engines: {node: '>=4.0.0'}
+
+  pg-pool@3.10.1:
+    resolution: {integrity: sha512-Tu8jMlcX+9d8+QVzKIvM/uJtp07PKr82IUOYEphaWcoBhIYkoHpLXN3qO59nAI11ripznDsEzEv8nUxBVWajGg==}
+    peerDependencies:
+      pg: '>=8.0'
+
+  pg-protocol@1.10.3:
+    resolution: {integrity: sha512-6DIBgBQaTKDJyxnXaLiLR8wBpQQcGWuAESkRBX/t6OwA8YsqP+iVSiond2EDy6Y/dsGk8rh/jtax3js5NeV7JQ==}
+
+  pg-types@2.2.0:
+    resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
+    engines: {node: '>=4'}
+
+  pg@8.16.3:
+    resolution: {integrity: sha512-enxc1h0jA/aq5oSDMvqyW3q89ra6XIIDZgCX9vkMrnz5DFTw/Ny3Li2lFQ+pt3L6MCgm/5o2o8HW9hiJji+xvw==}
+    engines: {node: '>= 16.0.0'}
+    peerDependencies:
+      pg-native: '>=3.0.1'
+    peerDependenciesMeta:
+      pg-native:
+        optional: true
+
+  pgpass@1.0.5:
+    resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -4831,6 +4884,22 @@ packages:
   postcss@8.5.6:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
     engines: {node: ^10 || ^12 || >=14}
+
+  postgres-array@2.0.0:
+    resolution: {integrity: sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA==}
+    engines: {node: '>=4'}
+
+  postgres-bytea@1.0.0:
+    resolution: {integrity: sha512-xy3pmLuQqRBZBXDULy7KbaitYqLcmxigw14Q5sj8QBVLqEwXfeybIKVWiqAXTlcvdvb0+xkOtDbfQMOf4lST1w==}
+    engines: {node: '>=0.10.0'}
+
+  postgres-date@1.0.7:
+    resolution: {integrity: sha512-suDmjLVQg78nMK2UZ454hAG+OAW+HQPZ6n++TNDUX+L0+uUlLywnoxJKDou51Zm+zTCjrCl0Nq6J9C5hP9vK/Q==}
+    engines: {node: '>=0.10.0'}
+
+  postgres-interval@1.2.0:
+    resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
+    engines: {node: '>=0.10.0'}
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
@@ -5237,6 +5306,10 @@ packages:
 
   sparse-bitfield@3.0.3:
     resolution: {integrity: sha512-kvzhi7vqKTfkh0PZU+2D2PIllw2ymqJKujUcyPMd9Y75Nv4nPbGJZXNhxsgdQab2BmlDct1YnfQCguEvHr7VsQ==}
+
+  split2@4.2.0:
+    resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
+    engines: {node: '>= 10.x'}
 
   sprintf-js@1.0.3:
     resolution: {integrity: sha512-D9cPgkvLlV3t3IzL0D0YLvGA9Ahk4PcvVwUbN0dSGr1aP0Nrt4AEnTUbuGvquEC0mA64Gqt1fzirlRs5ibXx8g==}
@@ -6867,8 +6940,8 @@ snapshots:
       - aws-crt
       - encoding
 
-  '@langchain/community@0.3.53(@aws-crypto/sha256-js@5.2.0)(@aws-sdk/credential-provider-node@3.879.0)(@browserbasehq/sdk@2.6.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.55.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(zod@3.25.76))(@elastic/elasticsearch@8.19.1)(@ibm-cloud/watsonx-ai@1.6.12)(@langchain/anthropic@0.3.26(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/cohere@0.3.4(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))(@opentelemetry/api@1.9.0)(@pinecone-database/pinecone@5.1.2)(@smithy/util-utf8@2.3.0)(axios@1.11.0)(cohere-ai@7.18.1)(fast-xml-parser@5.2.5)(ibm-cloud-sdk-core@5.4.2)(ignore@5.3.2)(jsonwebtoken@9.0.2)(lodash@4.17.21)(mongodb@6.19.0(@aws-sdk/credential-providers@3.879.0))(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(playwright@1.55.0)(weaviate-client@3.8.1)(ws@8.18.3)':
-    dependencies:
+  ? '@langchain/community@0.3.53(@aws-crypto/sha256-js@5.2.0)(@aws-sdk/credential-provider-node@3.879.0)(@browserbasehq/sdk@2.6.0)(@browserbasehq/stagehand@1.14.0(@playwright/test@1.55.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(zod@3.25.76))(@elastic/elasticsearch@8.19.1)(@ibm-cloud/watsonx-ai@1.6.12)(@langchain/anthropic@0.3.26(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/cohere@0.3.4(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))(@opentelemetry/api@1.9.0)(@pinecone-database/pinecone@5.1.2)(@smithy/util-utf8@2.3.0)(axios@1.11.0)(cohere-ai@7.18.1)(fast-xml-parser@5.2.5)(ibm-cloud-sdk-core@5.4.2)(ignore@5.3.2)(jsonwebtoken@9.0.2)(lodash@4.17.21)(mongodb@6.19.0(@aws-sdk/credential-providers@3.879.0))(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(pg@8.16.3)(playwright@1.55.0)(weaviate-client@3.8.1)(ws@8.18.3)'
+  : dependencies:
       '@browserbasehq/stagehand': 1.14.0(@playwright/test@1.55.0)(deepmerge@4.3.1)(dotenv@16.6.1)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))(zod@3.25.76)
       '@ibm-cloud/watsonx-ai': 1.6.12
       '@langchain/core': 0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))
@@ -6897,6 +6970,7 @@ snapshots:
       jsonwebtoken: 9.0.2
       lodash: 4.17.21
       mongodb: 6.19.0(@aws-sdk/credential-providers@3.879.0)
+      pg: 8.16.3
       playwright: 1.55.0
       weaviate-client: 3.8.1
       ws: 8.18.3
@@ -6971,6 +7045,14 @@ snapshots:
       - babel-plugin-macros
       - openai
       - supports-color
+
+  '@langchain/langgraph-checkpoint-postgres@0.1.2(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))(@langchain/langgraph-checkpoint@0.0.18(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))))':
+    dependencies:
+      '@langchain/core': 0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76))
+      '@langchain/langgraph-checkpoint': 0.0.18(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))
+      pg: 8.16.3
+    transitivePeerDependencies:
+      - pg-native
 
   '@langchain/langgraph-checkpoint@0.0.16(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@4.104.0(ws@8.18.3)(zod@3.25.76)))':
     dependencies:
@@ -7997,6 +8079,12 @@ snapshots:
   '@types/node@24.3.0':
     dependencies:
       undici-types: 7.10.0
+
+  '@types/pg@8.15.5':
+    dependencies:
+      '@types/node': 22.18.0
+      pg-protocol: 1.10.3
+      pg-types: 2.2.0
 
   '@types/prismjs@1.26.5': {}
 
@@ -9532,7 +9620,7 @@ snapshots:
       isstream: 0.1.2
       jsonwebtoken: 9.0.2
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.11.0(debug@4.4.1))
+      retry-axios: 2.6.0(axios@1.11.0)
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -10742,6 +10830,41 @@ snapshots:
 
   pend@1.2.0: {}
 
+  pg-cloudflare@1.2.7:
+    optional: true
+
+  pg-connection-string@2.9.1: {}
+
+  pg-int8@1.0.1: {}
+
+  pg-pool@3.10.1(pg@8.16.3):
+    dependencies:
+      pg: 8.16.3
+
+  pg-protocol@1.10.3: {}
+
+  pg-types@2.2.0:
+    dependencies:
+      pg-int8: 1.0.1
+      postgres-array: 2.0.0
+      postgres-bytea: 1.0.0
+      postgres-date: 1.0.7
+      postgres-interval: 1.2.0
+
+  pg@8.16.3:
+    dependencies:
+      pg-connection-string: 2.9.1
+      pg-pool: 3.10.1(pg@8.16.3)
+      pg-protocol: 1.10.3
+      pg-types: 2.2.0
+      pgpass: 1.0.5
+    optionalDependencies:
+      pg-cloudflare: 1.2.7
+
+  pgpass@1.0.5:
+    dependencies:
+      split2: 4.2.0
+
   picocolors@1.1.1: {}
 
   picomatch@2.3.1: {}
@@ -10807,6 +10930,16 @@ snapshots:
       nanoid: 3.3.11
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  postgres-array@2.0.0: {}
+
+  postgres-bytea@1.0.0: {}
+
+  postgres-date@1.0.7: {}
+
+  postgres-interval@1.2.0:
+    dependencies:
+      xtend: 4.0.2
 
   prelude-ls@1.2.1: {}
 
@@ -11129,7 +11262,7 @@ snapshots:
       path-parse: 1.0.7
       supports-preserve-symlinks-flag: 1.0.0
 
-  retry-axios@2.6.0(axios@1.11.0(debug@4.4.1)):
+  retry-axios@2.6.0(axios@1.11.0):
     dependencies:
       axios: 1.11.0(debug@4.4.1)
 
@@ -11327,6 +11460,8 @@ snapshots:
   sparse-bitfield@3.0.3:
     dependencies:
       memory-pager: 1.5.0
+
+  split2@4.2.0: {}
 
   sprintf-js@1.0.3: {}
 

@@ -31,7 +31,10 @@
   },
   "packageManager": "pnpm@10.6.3",
   "dependencies": {
+    "@langchain/langgraph-checkpoint-postgres": "^0.1.2",
     "@langchain/mcp-adapters": "^0.6.0",
-    "@modelcontextprotocol/sdk": "^1.17.4"
+    "@modelcontextprotocol/sdk": "^1.17.4",
+    "@types/pg": "^8.15.5",
+    "pg": "^8.16.3"
   }
 }
