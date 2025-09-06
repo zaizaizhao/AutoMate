@@ -8,6 +8,8 @@ import { initChatModel } from 'langchain/chat_models/universal';
 import { ConfigurableChatModelCallOptions, ConfigurableModel } from 'langchain/chat_models/universal';
 import { BaseLanguageModelInput } from '@langchain/core/language_models/base';
 import { ConfigurationSchema } from '../ModelUtils/Config.js';
+import { RunnableConfig } from '@langchain/core/runnables';
+import { getTestServerTools } from '../mcp-servers/mcp-client.js';
 
 export interface AgentConfig {
   agentId: string;
@@ -31,6 +33,10 @@ export abstract class BaseAgent {
 
   protected abstract initializellm(): any;
   protected abstract buildGraph(): any;
+
+  async analyzeToolsNode(state: typeof MessagesAnnotation.State, config: RunnableConfig){
+    const tools = await getTestServerTools();
+  }
 
   // 保存记忆到共享存储
   protected async saveSharedMemory(
@@ -76,15 +82,4 @@ export abstract class BaseAgent {
     });
   }
 
-  // 执行Agent
-  async invoke(input: any, config?: any) {
-    const compiledGraph = this.compile();
-    return await compiledGraph.invoke(input, {
-      ...config,
-      configurable: {
-        thread_id: this.config.namespace.session_id || 'default',
-        ...config?.configurable
-      }
-    });
-  }
 }
