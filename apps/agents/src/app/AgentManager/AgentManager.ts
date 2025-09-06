@@ -4,7 +4,7 @@
 import { HumanMessage } from '@langchain/core/messages';
 import { BaseLanguageModelInput } from '@langchain/core/language_models/base';
 import { ConfigurableChatModelCallOptions, ConfigurableModel } from 'langchain/chat_models/universal';
-import { PlanAgent } from '../Agents/PlanAgent.js';
+import { PlanAgent } from '../Agents/PlanAgent/PlanAgent.js';
 import { MemoryNamespace, SharedMemoryManager } from '../Memory/SharedMemoryManager.js';
 import { END, MessagesAnnotation, START, StateGraph } from '@langchain/langgraph';
 
@@ -18,24 +18,20 @@ export interface CoordinatorConfig {
 export class MultiAgentCoordinator {
     private memoryManager: SharedMemoryManager;
     private namespace: MemoryNamespace;
-    // private llm: ConfigurableModel<BaseLanguageModelInput, ConfigurableChatModelCallOptions>;
     private agents: Map<string, any> = new Map();
 
     constructor() {
         // this.memoryManager = config.memoryManager;
         // this.namespace = config.namespace;
-
-        // this.llm = config.llm;
         // this.initializeAgents();
     }
 
     public initializeAgents(): any {
         // 初始化研究Agent
         const planAgent = new PlanAgent({
-            agentId: 'research-001',
+            agentId: 'plan-agent-001',
             agentType: 'planAgent',
             namespace: { ...this.namespace, agent_type: 'planAgent' },
-            // llm: this.llm,
             memoryManager: this.memoryManager
         });
 
@@ -44,9 +40,9 @@ export class MultiAgentCoordinator {
             .addNode("plan-agent", planAgentNode)
             .addEdge(START, "plan-agent")
             .addEdge("plan-agent", END)
-        // this.agents.set('research', planAgentNode);
-        return multiAgentGraph
 
+        this.agents.set('research', planAgentNode);
+        return multiAgentGraph
     }
 
     // 协调多个Agent执行任务

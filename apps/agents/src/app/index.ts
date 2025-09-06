@@ -1,5 +1,5 @@
 import { MultiAgentCoordinator } from "./AgentManager/AgentManager.js";
-import {PlanAgent} from "./Agents/PlanAgent.js"
+import {PlanAgent} from "./Agents/PlanAgent/PlanAgent.js"
 import { loadChatModel } from "./ModelUtils/ChatModel.js";
 import { ConfigurationSchema } from "./ModelUtils/Config.js";
 

@@ -4,7 +4,7 @@ import { MessagesAnnotation, StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 
 import { ConfigurationSchema, ensureConfiguration } from "./configuration.js";
-import { getTools } from "../mcp-servers/mcp-client.js";
+import { getTools } from "../app/mcp-servers/mcp-client.js";
 import { loadChatModel } from "./utils.js";
 
 // Define the function that calls the model

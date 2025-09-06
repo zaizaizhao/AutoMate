@@ -2,7 +2,7 @@ import { RunnableConfig } from "@langchain/core/runnables";
 import { Command, MessagesAnnotation } from "@langchain/langgraph";
 import { ensureConfiguration } from "./configuration.js";
 import { loadChatModel } from "./utils.js";
-import { getTestServerTools } from "src/mcp-servers/mcp-client.js";
+import { getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import { TOOL_MESSAGE_EXTRACT_PROMPT } from "./prompts.js";
 
 // 验证输出格式的函数
