@@ -3,54 +3,75 @@ import { BaseAgent } from "../BaseAgent/BaseAgent.js";
 
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ConfigurationSchema } from "../ModelUtils/Config.js";
+import { RunnableConfig } from "@langchain/core/runnables";
+import { loadChatModel } from "../ModelUtils/index.js";
 
 export class PlanAgent extends BaseAgent {
-  protected buildGraph(): StateGraph<typeof MessagesAnnotation.State,typeof ConfigurationSchema.State> {
-    // 计划节点
-    const planNode = async (state: typeof MessagesAnnotation.State) => {    
+  private llm :any
+  protected async initializellm() {
+    this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3"); 
+  }
+  
+  async planNode(state: typeof MessagesAnnotation.State, config: RunnableConfig) {
+      console.log("[PlanAgent] planNode started");
+      console.log("[PlanAgent] state.messages:", state.messages);
+      
       const lastMessage = state.messages[state.messages.length - 1];
+      console.log("[PlanAgent] lastMessage:", lastMessage);
       
-      // 获取之前的研究结果
-      const previousResearch = await this.getSharedMemory('research_results') || [];
+      // 确保LLM已初始化
+      if (!this.llm) {
+        console.log("[PlanAgent] Initializing LLM...");
+        await this.initializellm();
+      }
+      console.log("this is this",this);
       
-      // 执行研究逻辑
-      const researchPrompt = `
-        基于以下问题进行研究：${lastMessage.content}
+      console.log("[PlanAgent] LLM initialized:", !!this.llm);
+      const llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3")
+      try {
+        const response = await llm.invoke([
+          new SystemMessage('你是一个专业的研究助手，负责收集和分析信息。'),
+          new HumanMessage("请提供研究分析")
+        ]);
         
-        之前的研究结果：
-        ${JSON.stringify(previousResearch, null, 2)}
+        console.log("[PlanAgent] LLM response:", response);
         
-        请提供新的研究发现和见解。
-      `;
-      
-      const response = await this.config.llm.invoke([
-        new SystemMessage('你是一个专业的研究助手，负责收集和分析信息。'),
-        new HumanMessage(researchPrompt)
-      ]);
-      
-      // 保存研究结果到共享记忆
-      const newResearch = {
-        timestamp: new Date().toISOString(),
-        query: lastMessage.content,
-        findings: response.content,
-        agent_id: this.config.agentId
-      };
-      
-      previousResearch.push(newResearch);
-      await this.saveSharedMemory('research_results', previousResearch);
-      
-      // 通知其他Agent有新的研究结果
-      await this.saveSharedMemory('latest_research', newResearch, { expiresIn: 3600 });
-      
-      return {
-        messages: [new AIMessage(`研究完成：${response.content}`)]
-      };
-    };
+        // 保存研究结果到共享记忆
+        // const newResearch = {
+        //   timestamp: new Date().toISOString(),
+        //   query: lastMessage.content,
+        //   findings: response.content,
+        //   agent_id: this.config?.agentId || 'plan-agent'
+        // };
+        
+        console.log("[PlanAgent] Returning messages:", [response]);
+        
+        return {
+          messages: [response]
+        };
+      } catch (error) {
+        console.error("[PlanAgent] Error in planNode:", error);
+        
+        // 返回错误消息
+        const errorMessage = new AIMessage({
+          content: `执行出错: ${error}`
+        });
+        
+        return {
+          messages: [errorMessage]
+        };
+      }
+    }
 
-    const workflow = new StateGraph(MessagesAnnotation,ConfigurationSchema)
-   .addNode("plan-node", planNode)
-   .addEdge(START, "plan-node")
-   .addEdge("plan-node", END)
-   return workflow;
+  public buildGraph() {
+    console.log("[PlanAgent] Building graph...");
+    // 计划节点
+    const workflow = new StateGraph(MessagesAnnotation, ConfigurationSchema)
+      .addNode("plan-node", this.planNode.bind(this))
+      .addEdge(START, "plan-node")
+      .addEdge("plan-node", END);
+    
+    console.log("[PlanAgent] Graph built successfully");
+    return workflow.compile();
   }
 }

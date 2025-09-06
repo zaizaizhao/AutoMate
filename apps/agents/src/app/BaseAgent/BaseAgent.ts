@@ -13,14 +13,15 @@ export interface AgentConfig {
   agentId: string;
   agentType: string;
   namespace: MemoryNamespace;
-  llm: ConfigurableModel<BaseLanguageModelInput, ConfigurableChatModelCallOptions>;
+  // llm: ConfigurableModel<BaseLanguageModelInput, ConfigurableChatModelCallOptions>;
   memoryManager: SharedMemoryManager;
 }
 
 export abstract class BaseAgent {
   protected config: AgentConfig;
-  protected graph: StateGraph<typeof MessagesAnnotation.State,typeof ConfigurationSchema.State>;
+  protected graph: any;
   protected memoryManager: SharedMemoryManager;
+  // protected llm :any
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -28,7 +29,8 @@ export abstract class BaseAgent {
     this.graph = this.buildGraph();
   }
 
-  protected abstract buildGraph(): StateGraph<typeof MessagesAnnotation.State,typeof ConfigurationSchema.State>;
+  protected abstract initializellm(): any;
+  protected abstract buildGraph(): any;
 
   // 保存记忆到共享存储
   protected async saveSharedMemory(

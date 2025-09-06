@@ -7,6 +7,7 @@ import { initChatModel } from "langchain/chat_models/universal";
 export async function loadChatModel(
   fullySpecifiedName: string,
 ): Promise<ReturnType<typeof initChatModel>> {
+  console.log(fullySpecifiedName);
   const index = fullySpecifiedName.indexOf("/");
   if (index === -1) {
     // If there's no "/", assume it's just the model
@@ -26,9 +27,6 @@ export async function loadChatModel(
         modelProvider: "openai",
         configuration: {
           baseURL: process.env.OPENAI_API_BASE_URL,
-        },
-        modelKwargs: {
-          stream_options: { include_usage: false }
         },
       });
     } else {
