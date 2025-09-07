@@ -7,34 +7,11 @@ import { RunnableConfig } from "@langchain/core/runnables";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
 import { TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
 import { getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
-import type { TaskPlanedForTest, PlanProgress } from "../../Memory/SharedMemoryManager.js";
+import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
 import { planOutputSchema } from "./StructuredOutputSchema.js";
 
-// 复杂度级别枚举
-enum ComplexityLevel {
-  LOW = "low",
-  MEDIUM = "medium",
-  HIGH = "high"
-}
 
-// 任务参数类型
-type TaskParameters = Record<string, any> | string;
 
-// 任务接口
-interface Task {
-  taskId: string;
-  toolName: string;
-  description: string;
-  parameters: TaskParameters;
-  complexity: ComplexityLevel;
-  isRequiredValidateByDatabase: boolean;
-}
-
-// 批次任务接口
-interface BatchTask {
-  batchIndex: number;
-  tasks: Task[];
-}
 
 export class PlanAgent extends BaseAgent {
   private llm: any;
@@ -267,133 +244,8 @@ export class PlanAgent extends BaseAgent {
       };
     }
   }
-
-  startOrContinuePlan() {
-
-  }
-
-  /**
-   * 执行完整的任务计划
-   * @param threadId 线程ID，作为计划ID
-   * @param tasks 任务列表
-   */
-  async executePlan(threadId: string, tasks: TaskPlanedForTest[]): Promise<void> {
-    console.log(`[PlanAgent] Starting plan execution for thread: ${threadId}`);
-
-    try {
-      // 1. 保存任务计划
-      await this.memoryManager.saveTaskPlans(threadId, tasks);
-      console.log(`[PlanAgent] Saved ${tasks.length} tasks for plan ${threadId}`);
-
-      // 2. 初始化或更新进度
-      const existingProgress = await this.memoryManager.getPlanProgress(threadId);
-      if (!existingProgress) {
-        const totalBatches = Math.max(...tasks.map(t => t.batchIndex)) + 1;
-        const progress: PlanProgress = {
-          planId: threadId,
-          totalBatches,
-          completedBatches: 0,
-          failedBatches: 0,
-          currentBatchIndex: 0,
-          overallSuccessRate: 0,
-          lastUpdated: new Date()
-        };
-        await this.memoryManager.savePlanProgress(progress);
-        console.log(`[PlanAgent] Initialized progress for plan ${threadId} with ${totalBatches} batches`);
-      }
-
-      // 3. 按批次执行任务
-      const batches = this.groupTasksByBatch(tasks);
-      console.log(`[PlanAgent] Executing ${batches.size} batches`);
-
-      for (const [batchIndex, batchTasks] of batches) {
-        await this.executeBatch(threadId, batchIndex, batchTasks);
-      }
-
-      console.log(`[PlanAgent] Plan execution completed for thread: ${threadId}`);
-    } catch (error) {
-      console.error(`[PlanAgent] Error executing plan ${threadId}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * 将任务按批次分组
-   * @param tasks 任务列表
-   * @returns 按批次分组的任务Map
-   */
-  private groupTasksByBatch(tasks: TaskPlanedForTest[]): Map<number, TaskPlanedForTest[]> {
-    const batches = new Map<number, TaskPlanedForTest[]>();
-
-    for (const task of tasks) {
-      const batchIndex = task.batchIndex;
-      if (!batches.has(batchIndex)) {
-        batches.set(batchIndex, []);
-      }
-      batches.get(batchIndex)!.push(task);
-    }
-
-    return batches;
-  }
-
-  /**
-   * 执行单个批次的任务
-   * @param planId 计划ID
-   * @param batchIndex 批次索引
-   * @param tasks 批次中的任务列表
-   */
-  private async executeBatch(
-    planId: string,
-    batchIndex: number,
-    tasks: TaskPlanedForTest[]
-  ): Promise<void> {
-    console.log(`[PlanAgent] Executing batch ${batchIndex} for plan ${planId} with ${tasks.length} tasks`);
-
-    // 1. 获取当前进度
-    const progress = await this.getPlanProgress(planId);
-    if (!progress) {
-      console.warn(`[PlanAgent] No progress found for plan ${planId}. Initializing...`);
-      await this.memoryManager.savePlanProgress({
-        planId,
-        totalBatches: Math.max(...tasks.map(t => t.batchIndex)) + 1,
-        completedBatches: 0,
-        failedBatches: 0,
-        currentBatchIndex: 0,
-        overallSuccessRate: 0,
-        lastUpdated: new Date()
-      });
-    }
-
-    // 2. 执行每个任务
-    for (const task of tasks) {
-      try {
-        await this.executeTask(task);
-        console.log(`[PlanAgent] Task ${task.taskId} executed successfully`);
-        // 可在此更新任务状态为 completed
-      } catch (error) {
-        console.error(`[PlanAgent] Task ${task.taskId} failed:`, error);
-        // 可在此更新任务状态为 failed，并记录错误信息
-      }
-    }
-
-    // 3. 更新批次完成情况
-    console.log(`[PlanAgent] Completed batch ${batchIndex} for plan ${planId}`);
-  }
-
-  private async executeTask(task: TaskPlanedForTest): Promise<any> {
-    // TODO: 实现具体的任务执行逻辑
-    console.log(`[PlanAgent] Executing task: ${task.taskId} using tool ${task.toolName}`);
-    return Promise.resolve();
-  }
-
-  async getPlanProgress(planId: string): Promise<PlanProgress | null> {
-    try {
-      return await this.memoryManager.getPlanProgress(planId);
-    } catch (error) {
-      console.error(`[PlanAgent] Error getting progress for plan ${planId}:`, error);
-      return null;
-    }
-  }
+  // agent执行终端机制
+  startOrContinuePlan() {}
 
   async getBatchTasks(planId: string, batchIndex: number): Promise<TaskPlanedForTest[]> {
     try {
@@ -405,7 +257,7 @@ export class PlanAgent extends BaseAgent {
   }
 
   async takeActionOrGeneratePlan(
-    state: typeof MessagesAnnotation.State,
+    _state: typeof MessagesAnnotation.State,
   ): Promise<"plan-node" | typeof END> {
     try {
       const threadId = this.lastThreadId;

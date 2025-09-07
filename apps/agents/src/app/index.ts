@@ -21,9 +21,6 @@ console.warn = (...args) => {
   originalConsoleWarn.apply(console, args);
 };
 
-// const llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
-// console.log("this is llm",llm);
-
 // 创建数据库连接池
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/agents'
@@ -45,6 +42,3 @@ const multiAgentCoordinator = new MultiAgentCoordinator(memoryManager, namespace
 const workflow = multiAgentCoordinator.initializeAgents()
 export const graph = workflow.compile();
 graph.name = "agent";
-// const planAgent = new PlanAgent(ConfigurationSchema);
-// const graph = new StateGraph(MessagesAnnotation, ConfigurationSchema)
-// graph.name = "AutoMete";
