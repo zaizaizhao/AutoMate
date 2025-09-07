@@ -20,10 +20,9 @@ export class MultiAgentCoordinator {
     private namespace: MemoryNamespace;
     private agents: Map<string, any> = new Map();
 
-    constructor() {
-        // this.memoryManager = config.memoryManager;
-        // this.namespace = config.namespace;
-        // this.initializeAgents();
+    constructor(memoryManager: SharedMemoryManager, namespace: MemoryNamespace) {
+        this.memoryManager = memoryManager;
+        this.namespace = namespace;
     }
 
     public initializeAgents(): any {
@@ -31,7 +30,7 @@ export class MultiAgentCoordinator {
         const planAgent = new PlanAgent({
             agentId: 'plan-agent-001',
             agentType: 'planAgent',
-            namespace: { ...this.namespace, agent_type: 'planAgent' },
+            namespace: this.namespace,
             memoryManager: this.memoryManager
         });
 
@@ -78,7 +77,7 @@ export class MultiAgentCoordinator {
             // 3. 执行总结Agent
             console.log('📝 开始总结阶段...');
             const summaryAgent = this.agents.get('summary');
-            const result = await summaryAgent.invoke({
+            await summaryAgent.invoke({
                 messages: [new HumanMessage(userQuery)]
             }, config);
 

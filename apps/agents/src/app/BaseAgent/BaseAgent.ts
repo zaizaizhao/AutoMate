@@ -1,15 +1,8 @@
 // agents/BaseAgent.ts
-import { StateGraph } from '@langchain/langgraph';
-import { Command, MessagesAnnotation } from "@langchain/langgraph";
-import { ChatOpenAI } from '@langchain/openai';
-import { HumanMessage, AIMessage } from '@langchain/core/messages';
-import { MemoryNamespace, SharedMemoryManager } from '../Memory/SharedMemoryManager.js';
-import { initChatModel } from 'langchain/chat_models/universal';
-import { ConfigurableChatModelCallOptions, ConfigurableModel } from 'langchain/chat_models/universal';
-import { BaseLanguageModelInput } from '@langchain/core/language_models/base';
-import { ConfigurationSchema } from '../ModelUtils/Config.js';
-import { RunnableConfig } from '@langchain/core/runnables';
-import { getTestServerTools } from '../mcp-servers/mcp-client.js';
+import { MessagesAnnotation } from "@langchain/langgraph";
+import { RunnableConfig } from "@langchain/core/runnables";
+import { SharedMemoryManager, MemoryNamespace } from "../Memory/SharedMemoryManager.js";
+import { getTestServerTools } from "../mcp-servers/mcp-client.js";
 
 export interface AgentConfig {
   agentId: string;
@@ -34,8 +27,8 @@ export abstract class BaseAgent {
   protected abstract initializellm(): any;
   protected abstract buildGraph(): any;
 
-  async analyzeToolsNode(state: typeof MessagesAnnotation.State, config: RunnableConfig){
-    const tools = await getTestServerTools();
+  async analyzeToolsNode(_state: typeof MessagesAnnotation.State, _config: RunnableConfig){
+    await getTestServerTools();
   }
 
   // 保存记忆到共享存储

@@ -38,7 +38,7 @@ export interface BatchTasks {
 
 // 流程类型定义 (planagent需要获取上次的PlanProgress，以及更新当前的PlanProgress)
 export interface PlanProgress {
-  planId: string; //存储当前的threadId
+  planId: string;
   totalBatches: number;
   completedBatches: number;
   failedBatches: number;

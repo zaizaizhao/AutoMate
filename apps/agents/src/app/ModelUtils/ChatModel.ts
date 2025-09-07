@@ -24,6 +24,9 @@ export async function loadChatModel(
       console.log("this is openai api base url", process.env.OPENAI_API_BASE_URL);
       console.log("this is openai api key", process.env.OPENAI_API_KEY);
       return await initChatModel(model, {
+        // modelKwargs: {
+        //   stream_options: { include_usage: false }
+        // },
         modelProvider: "openai",
         configuration: {
           baseURL: process.env.OPENAI_API_BASE_URL,

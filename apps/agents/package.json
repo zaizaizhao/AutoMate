@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx @langchain/langgraph-cli dev --port 2024 --config ../../langgraph.json",
+    "dev": "set LANGCHAIN_VERBOSE=false&& set LANGCHAIN_CALLBACKS_BACKGROUND=false&& set LANGCHAIN_TRACING_V2=false&& npx @langchain/langgraph-cli dev --port 2024 --config ../../langgraph.json",
     "build": "turbo build:internal --filter=agents",
     "build:internal": "pnpm run clean && tsc",
     "clean": "rm -rf ./dist .turbo || true",
