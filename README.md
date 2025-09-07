@@ -1,3 +1,1 @@
-# Agent App
-
-# TODO: ADD README
+![Graph](docs/imgs/graph.png)

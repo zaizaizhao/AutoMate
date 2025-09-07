@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-`ExcuteTestAgent` 是一个专门用于执行接口测试的智能代理，负责从数据库中读取 `PlanAgent` 生成的测试计划数据，并根据这些数据调用相应的 MCP 工具进行接口测试。该代理能够记录测试结果、更新任务状态，并提供详细的测试报告和失败分析。
+`ExcuteTestAgent` 是一个专门用于执行MCP工具调用的智能代理，负责从数据库中读取 `PlanAgent` 生成的测试计划数据，并通过LLM调用相应的MCP工具。该代理专注于工具调用执行，调用结果直接存储到PostgreSQL记忆系统中。
 
 ## 2. 架构设计
 
@@ -10,42 +10,43 @@
 
 ```mermaid
 graph TD
-    A[ExcuteTestAgent] --> B[SharedMemoryManager]
-    A --> C[MCP Client Manager]
-    A --> D[Task Executor]
+    A[ExcuteTestAgent] --> B[LLM]
+    A --> C[SharedMemoryManager]
+    A --> D[MCP Client Manager]
     
-    B --> E[(task_plans表)]
-    B --> F[(plan_progress表)]
+    B --> E[Tool Calling]
+    C --> F[(task_plans表)]
+    C --> G[(memory_store表)]
     
-    C --> G[Test Server Tools]
-    C --> H[JSON Writer Tools]
+    D --> H[Test Server Tools]
+    D --> I[JSON Writer Tools]
     
-    D --> I[结果记录器]
-    D --> J[状态更新器]
+    E --> H
+    E --> I
+    
+    subgraph "AI层"
+        B
+        E
+    end
     
     subgraph "数据层"
-        E
         F
+        G
     end
     
     subgraph "工具层"
-        G
         H
-    end
-    
-    subgraph "执行层"
         I
-        J
     end
 ```
 
 ### 2.2 核心组件
 
-- **TaskReader**: 从数据库读取待执行的测试任务
-- **ToolExecutor**: 执行MCP工具调用
-- **ResultRecorder**: 记录测试结果和错误信息
-- **StatusUpdater**: 更新任务和计划状态
-- **ReportGenerator**: 生成测试报告
+* **TaskReader**: 从数据库读取待执行的测试任务
+
+* **LLMToolCaller**: 通过LLM调用MCP工具
+
+* **MemoryStore**: 将调用结果存储到PostgreSQL记忆系统
 
 ## 3. 数据结构
 
@@ -58,30 +59,20 @@ interface TaskPlanedForTest {
   task_name: string;
   tool_name: string;
   tool_args: Record<string, any>;
-  expected_result?: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
-  result?: string;
-  error_message?: string;
-  execution_time?: number;
   created_at: Date;
   updated_at: Date;
 }
 ```
 
-### 3.2 测试执行结果
+### 3.2 工具调用结果
 
 ```typescript
-interface TestExecutionResult {
+interface ToolCallResult {
   taskId: string;
-  success: boolean;
-  result?: any;
-  error?: {
-    message: string;
-    stack?: string;
-    toolName: string;
-    toolArgs: Record<string, any>;
-  };
-  executionTime: number;
+  toolName: string;
+  toolArgs: Record<string, any>;
+  result: any;
   timestamp: Date;
 }
 ```
@@ -94,20 +85,17 @@ interface TestExecutionResult {
 export class ExcuteTestAgent extends BaseAgent {
   private llm: any;
   private mcpClientManager: MCPClientManager;
-  private taskExecutor: TaskExecutor;
-  private resultRecorder: ResultRecorder;
   
   constructor(config: AgentConfig) {
     super(config);
+    this.llm = config.llm;
     this.mcpClientManager = new MCPClientManager();
-    this.taskExecutor = new TaskExecutor(this.mcpClientManager);
-    this.resultRecorder = new ResultRecorder(this.memoryManager);
   }
 
   // 主要执行节点
   async ExcuteTestNode(state: typeof MessagesAnnotation.State, config: LangGraphRunnableConfig) {
     const threadId = config?.configurable?.thread_id;
-    console.log(`[ExcuteTestNode] Starting execution for thread: ${threadId}`);
+    console.log(`[ExcuteTestNode] Starting MCP tool execution for thread: ${threadId}`);
     
     try {
       // 1. 读取待执行的测试任务
@@ -118,31 +106,25 @@ export class ExcuteTestAgent extends BaseAgent {
         return { messages: [...state.messages] };
       }
       
-      // 2. 执行测试任务
-      const results = await this.executeTasks(pendingTasks);
+      // 2. 通过LLM调用MCP工具
+      const results = await this.executeTasksWithLLM(pendingTasks);
       
-      // 3. 更新任务状态和结果
-      await this.updateTaskResults(results);
-      
-      // 4. 更新计划进度
-      await this.updatePlanProgress(threadId);
-      
-      // 5. 生成执行报告
-      const report = await this.generateExecutionReport(results);
+      // 3. 存储结果到记忆系统
+      await this.storeResultsToMemory(results, threadId);
       
       return {
         messages: [
           ...state.messages,
           new AIMessage({
-            content: report,
+            content: `已完成 ${results.length} 个MCP工具调用，结果已存储到记忆系统`,
             additional_kwargs: {
-              execution_results: results
+              tool_call_count: results.length
             }
           })
         ]
       };
     } catch (error) {
-      console.error('[ExcuteTestNode] Execution failed:', error);
+      console.error('[ExcuteTestNode] MCP tool execution failed:', error);
       throw error;
     }
   }
@@ -155,15 +137,15 @@ export class ExcuteTestAgent extends BaseAgent {
 class TaskReader {
   constructor(private memoryManager: SharedMemoryManager) {}
   
-  async readPendingTasks(planId?: string): Promise<TaskPlanedForTest[]> {
+  async readPendingTasks(threadId?: string): Promise<TaskPlanedForTest[]> {
     const query = `
       SELECT * FROM task_plans 
       WHERE status = 'pending'
-      ${planId ? 'AND plan_id = $1' : ''}
+      ${threadId ? 'AND thread_id = $1' : ''}
       ORDER BY created_at ASC
     `;
     
-    const params = planId ? [planId] : [];
+    const params = threadId ? [threadId] : [];
     const result = await this.memoryManager.executeQuery(query, params);
     
     return result.rows.map(row => ({
@@ -172,11 +154,7 @@ class TaskReader {
       task_name: row.task_name,
       tool_name: row.tool_name,
       tool_args: JSON.parse(row.tool_args),
-      expected_result: row.expected_result,
       status: row.status,
-      result: row.result,
-      error_message: row.error_message,
-      execution_time: row.execution_time,
       created_at: new Date(row.created_at),
       updated_at: new Date(row.updated_at)
     }));
@@ -184,279 +162,214 @@ class TaskReader {
 }
 ```
 
-### 4.3 工具执行器 (ToolExecutor)
+### 4.3 LLM工具调用器 (LLMToolCaller)
 
 ```typescript
-class TaskExecutor {
-  constructor(private mcpClientManager: MCPClientManager) {}
+class LLMToolCaller {
+  constructor(
+    private llm: any,
+    private mcpClientManager: MCPClientManager
+  ) {}
   
-  async executeTasks(tasks: TaskPlanedForTest[]): Promise<TestExecutionResult[]> {
-    const results: TestExecutionResult[] = [];
+  async executeTasksWithLLM(tasks: TaskPlanedForTest[]): Promise<ToolCallResult[]> {
+    const results: ToolCallResult[] = [];
+    
+    // 获取可用的MCP工具
+    const availableTools = await this.mcpClientManager.getTestServerTools();
     
     for (const task of tasks) {
-      console.log(`[TaskExecutor] Executing task: ${task.task_name}`);
-      
-      const startTime = Date.now();
-      let result: TestExecutionResult;
+      console.log(`[LLMToolCaller] Processing task: ${task.task_name}`);
       
       try {
-        // 更新任务状态为运行中
-        await this.updateTaskStatus(task.id, 'running');
+        // 构建LLM调用提示
+        const prompt = this.buildToolCallPrompt(task, availableTools);
         
-        // 执行工具调用
-        const toolResult = await this.executeToolCall(task);
+        // 通过LLM调用工具
+        const toolResult = await this.callToolWithLLM(prompt, availableTools);
         
-        result = {
+        const result: ToolCallResult = {
           taskId: task.id,
-          success: true,
+          toolName: task.tool_name,
+          toolArgs: task.tool_args,
           result: toolResult,
-          executionTime: Date.now() - startTime,
           timestamp: new Date()
         };
         
-        console.log(`[TaskExecutor] Task ${task.task_name} completed successfully`);
+        results.push(result);
+        console.log(`[LLMToolCaller] Task ${task.task_name} completed`);
         
       } catch (error) {
-        result = {
+        console.error(`[LLMToolCaller] Task ${task.task_name} failed:`, error);
+        
+        // 即使失败也记录结果
+        const result: ToolCallResult = {
           taskId: task.id,
-          success: false,
-          error: {
-            message: error.message,
-            stack: error.stack,
-            toolName: task.tool_name,
-            toolArgs: task.tool_args
-          },
-          executionTime: Date.now() - startTime,
+          toolName: task.tool_name,
+          toolArgs: task.tool_args,
+          result: { error: error.message },
           timestamp: new Date()
         };
         
-        console.error(`[TaskExecutor] Task ${task.task_name} failed:`, error);
+        results.push(result);
       }
-      
-      results.push(result);
     }
     
     return results;
   }
   
-  private async executeToolCall(task: TaskPlanedForTest): Promise<any> {
-    // 获取对应的工具
-    const tools = await this.mcpClientManager.getTestServerTools();
-    const tool = tools.find(t => t.name === task.tool_name);
-    
-    if (!tool) {
-      throw new Error(`Tool not found: ${task.tool_name}`);
-    }
-    
-    // 验证工具参数
-    this.validateToolArgs(tool, task.tool_args);
-    
-    // 执行工具调用
-    console.log(`[ToolExecutor] Calling tool ${task.tool_name} with args:`, task.tool_args);
-    
-    const result = await tool.invoke(task.tool_args);
-    
-    console.log(`[ToolExecutor] Tool ${task.tool_name} returned:`, result);
-    
-    return result;
+  private buildToolCallPrompt(task: TaskPlanedForTest, availableTools: any[]): string {
+    return `
+请使用工具 "${task.tool_name}" 执行以下任务：
+
+任务名称: ${task.task_name}
+工具参数: ${JSON.stringify(task.tool_args, null, 2)}
+
+可用工具列表:
+${availableTools.map(tool => `- ${tool.name}: ${tool.description || ''}`).join('\n')}
+
+请调用指定的工具并返回结果。
+    `;
   }
   
-  private validateToolArgs(tool: any, args: Record<string, any>): void {
-    // 验证必需参数
-    if (tool.schema && tool.schema.required) {
-      for (const requiredParam of tool.schema.required) {
-        if (!(requiredParam in args)) {
-          throw new Error(`Missing required parameter: ${requiredParam}`);
-        }
+  private async callToolWithLLM(prompt: string, tools: any[]): Promise<any> {
+    // 使用LLM进行工具调用
+    const response = await this.llm.invoke(
+      [{ role: 'user', content: prompt }],
+      {
+        tools: tools,
+        tool_choice: 'auto'
+      }
+    );
+    
+    // 处理工具调用结果
+    if (response.tool_calls && response.tool_calls.length > 0) {
+      const toolCall = response.tool_calls[0];
+      const tool = tools.find(t => t.name === toolCall.name);
+      
+      if (tool) {
+        return await tool.invoke(toolCall.args);
       }
     }
-  }
-  
-  private async updateTaskStatus(taskId: string, status: string): Promise<void> {
-    const query = `
-      UPDATE task_plans 
-      SET status = $1, updated_at = NOW() 
-      WHERE id = $2
-    `;
     
-    await this.memoryManager.executeQuery(query, [status, taskId]);
+    return response.content;
   }
 }
 ```
 
-### 4.4 结果记录器 (ResultRecorder)
+### 4.4 记忆存储器 (MemoryStore)
 
 ```typescript
-class ResultRecorder {
+class MemoryStore {
   constructor(private memoryManager: SharedMemoryManager) {}
   
-  async updateTaskResults(results: TestExecutionResult[]): Promise<void> {
+  async storeResultsToMemory(results: ToolCallResult[], threadId: string): Promise<void> {
     for (const result of results) {
-      const status = result.success ? 'completed' : 'failed';
-      const resultData = result.success ? JSON.stringify(result.result) : null;
-      const errorMessage = result.error ? result.error.message : null;
+      // 构建存储键值
+      const namespace = ['execute_results', threadId, result.taskId];
+      const key = `tool_call_${result.toolName}_${Date.now()}`;
       
-      const query = `
-        UPDATE task_plans 
-        SET 
-          status = $1,
-          result = $2,
-          error_message = $3,
-          execution_time = $4,
-          updated_at = NOW()
-        WHERE id = $5
-      `;
+      // 准备存储数据
+      const storeData = {
+        taskId: result.taskId,
+        toolName: result.toolName,
+        toolArgs: result.toolArgs,
+        result: result.result,
+        timestamp: result.timestamp.toISOString(),
+        executedBy: 'ExcuteTestAgent'
+      };
       
-      await this.memoryManager.executeQuery(query, [
-        status,
-        resultData,
-        errorMessage,
-        result.executionTime,
-        result.taskId
-      ]);
-      
-      console.log(`[ResultRecorder] Updated task ${result.taskId} with status: ${status}`);
+      try {
+        // 存储到PostgreSQL记忆系统
+        await this.memoryManager.getStore().put(
+          namespace,
+          key,
+          JSON.stringify(storeData)
+        );
+        
+        console.log(`[MemoryStore] Stored result for task ${result.taskId} to memory system`);
+        
+      } catch (error) {
+        console.error(`[MemoryStore] Failed to store result for task ${result.taskId}:`, error);
+      }
     }
   }
   
-  async updatePlanProgress(planId: string): Promise<void> {
-    // 获取计划的任务统计
-    const statsQuery = `
-      SELECT 
-        COUNT(*) as total_tasks,
-        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_tasks,
-        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_tasks,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_tasks
-      FROM task_plans 
-      WHERE plan_id = $1
-    `;
-    
-    const statsResult = await this.memoryManager.executeQuery(statsQuery, [planId]);
-    const stats = statsResult.rows[0];
-    
-    // 计算进度百分比
-    const totalTasks = parseInt(stats.total_tasks);
-    const completedTasks = parseInt(stats.completed_tasks);
-    const progressPercentage = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
-    
-    // 更新计划进度
-    await this.memoryManager.updatePlanProgress(planId, {
-      total_tasks: totalTasks,
-      completed_tasks: completedTasks,
-      failed_tasks: parseInt(stats.failed_tasks),
-      pending_tasks: parseInt(stats.pending_tasks),
-      progress_percentage: progressPercentage,
-      updated_at: new Date()
-    });
-    
-    console.log(`[ResultRecorder] Updated plan ${planId} progress: ${progressPercentage.toFixed(2)}%`);
+  async getStoredResults(threadId: string, taskId?: string): Promise<any[]> {
+    try {
+      const namespace = ['execute_results', threadId];
+      
+      if (taskId) {
+        namespace.push(taskId);
+      }
+      
+      const results = await this.memoryManager.getStore().list(namespace);
+      
+      return results.map(item => {
+        try {
+          return JSON.parse(item.value);
+        } catch {
+          return item.value;
+        }
+      });
+      
+    } catch (error) {
+      console.error('[MemoryStore] Failed to retrieve stored results:', error);
+      return [];
+    }
   }
 }
 ```
 
-### 4.5 报告生成器 (ReportGenerator)
+### 4.5 完整实现示例
 
 ```typescript
-class ReportGenerator {
-  generateExecutionReport(results: TestExecutionResult[]): string {
-    const totalTasks = results.length;
-    const successfulTasks = results.filter(r => r.success).length;
-    const failedTasks = results.filter(r => !r.success).length;
-    const successRate = totalTasks > 0 ? (successfulTasks / totalTasks) * 100 : 0;
-    
-    let report = `## 测试执行报告\n\n`;
-    report += `### 执行概览\n`;
-    report += `- 总任务数: ${totalTasks}\n`;
-    report += `- 成功任务: ${successfulTasks}\n`;
-    report += `- 失败任务: ${failedTasks}\n`;
-    report += `- 成功率: ${successRate.toFixed(2)}%\n\n`;
-    
-    if (failedTasks > 0) {
-      report += `### 失败任务详情\n`;
-      const failedResults = results.filter(r => !r.success);
-      
-      for (const result of failedResults) {
-        report += `#### 任务ID: ${result.taskId}\n`;
-        report += `- **工具名称**: ${result.error?.toolName}\n`;
-        report += `- **调用参数**: \`${JSON.stringify(result.error?.toolArgs)}\`\n`;
-        report += `- **错误信息**: ${result.error?.message}\n`;
-        report += `- **执行时间**: ${result.executionTime}ms\n\n`;
-      }
-    }
-    
-    if (successfulTasks > 0) {
-      report += `### 成功任务概览\n`;
-      const successfulResults = results.filter(r => r.success);
-      
-      for (const result of successfulResults) {
-        report += `- 任务 ${result.taskId}: 执行成功 (${result.executionTime}ms)\n`;
-      }
-    }
-    
-    return report;
+// ExcuteTestAgent的完整实现
+export class ExcuteTestAgent extends BaseAgent {
+  private taskReader: TaskReader;
+  private llmToolCaller: LLMToolCaller;
+  private memoryStore: MemoryStore;
+  
+  constructor(config: AgentConfig) {
+    super(config);
+    this.taskReader = new TaskReader(this.memoryManager);
+    this.llmToolCaller = new LLMToolCaller(config.llm, new MCPClientManager());
+    this.memoryStore = new MemoryStore(this.memoryManager);
+  }
+  
+  async readPendingTasks(threadId: string): Promise<TaskPlanedForTest[]> {
+    return await this.taskReader.readPendingTasks(threadId);
+  }
+  
+  async executeTasksWithLLM(tasks: TaskPlanedForTest[]): Promise<ToolCallResult[]> {
+    return await this.llmToolCaller.executeTasksWithLLM(tasks);
+  }
+  
+  async storeResultsToMemory(results: ToolCallResult[], threadId: string): Promise<void> {
+    return await this.memoryStore.storeResultsToMemory(results, threadId);
   }
 }
 ```
 
-## 5. 错误处理策略
+## 5. 核心流程
 
-### 5.1 工具调用错误
+### 5.1 MCP工具调用流程
 
-- **工具不存在**: 记录错误并标记任务失败
-- **参数验证失败**: 提供详细的参数错误信息
-- **工具执行超时**: 设置合理的超时时间并记录超时错误
-- **网络连接错误**: 实现重试机制
+1. **任务读取**: 从`task_plans`表读取待执行的任务
+2. **LLM处理**: 构建提示词，通过LLM理解任务并选择合适的工具
+3. **工具调用**: LLM调用指定的MCP工具执行任务
+4. **结果存储**: 将工具调用结果存储到PostgreSQL记忆系统
 
-### 5.2 数据库操作错误
+### 5.2 与现有系统集成
 
-- **连接失败**: 实现连接重试和降级策略
-- **查询错误**: 记录详细的SQL错误信息
-- **事务回滚**: 确保数据一致性
+* **PlanAgent集成**: 读取PlanAgent生成的任务计划
 
-### 5.3 状态管理错误
+* **SharedMemoryManager集成**: 使用统一的记忆管理系统
 
-- **状态不一致**: 实现状态校验和修复机制
-- **并发冲突**: 使用乐观锁或悲观锁处理
+* **MCP工具集成**: 调用现有的MCP工具服务
 
-## 6. 性能优化
+## 6. 配置和部署
 
-### 6.1 批量处理
-
-- 支持批量读取和更新任务
-- 实现任务分组和并行执行
-- 优化数据库查询性能
-
-### 6.2 缓存策略
-
-- 缓存工具定义和配置
-- 缓存频繁查询的数据
-- 实现智能缓存失效
-
-### 6.3 资源管理
-
-- 合理管理MCP客户端连接
-- 实现连接池和资源回收
-- 监控内存和CPU使用情况
-
-## 7. 监控和日志
-
-### 7.1 关键指标
-
-- 任务执行成功率
-- 平均执行时间
-- 错误类型分布
-- 系统资源使用情况
-
-### 7.2 日志级别
-
-- **DEBUG**: 详细的执行流程
-- **INFO**: 关键操作和状态变更
-- **WARN**: 潜在问题和降级操作
-- **ERROR**: 错误和异常情况
-
-## 8. 部署和配置
-
-### 8.1 环境变量
+### 6.1 环境变量
 
 ```bash
 # 数据库配置
@@ -467,51 +380,66 @@ MCP_TEST_SERVER_URL=http://localhost:8080/mcp
 MCP_JSON_WRITER_COMMAND=tsx
 MCP_JSON_WRITER_ARGS=./src/mcp-servers/json-writer-server.ts
 
-# 执行配置
-TASK_EXECUTION_TIMEOUT=30000
-MAX_CONCURRENT_TASKS=5
-RETRY_ATTEMPTS=3
+# LLM配置
+OPENAI_API_KEY=your_openai_api_key
+LLM_MODEL=gpt-4
 ```
 
-### 8.2 启动流程
+## 7. 使用示例
 
-1. 初始化数据库连接
-2. 启动MCP客户端管理器
-3. 验证工具可用性
-4. 开始任务执行循环
+### 7.1 基本使用
 
-## 9. 测试策略
+```typescript
+// 创建ExcuteTestAgent实例
+const agent = new ExcuteTestAgent({
+  llm: llmInstance,
+  memoryManager: sharedMemoryManager
+});
 
-### 9.1 单元测试
+// 在LangGraph中使用
+const workflow = new StateGraph(MessagesAnnotation)
+  .addNode('execute_test', agent.ExcuteTestNode.bind(agent))
+  .addEdge(START, 'execute_test')
+  .addEdge('execute_test', END);
+```
 
-- 测试各个组件的独立功能
-- 模拟MCP工具调用
-- 验证错误处理逻辑
+### 7.2 查询执行结果
 
-### 9.2 集成测试
+```typescript
+// 获取特定线程的执行结果
+const results = await agent.memoryStore.getStoredResults(threadId);
+console.log('执行结果:', results);
+```
 
-- 测试完整的执行流程
-- 验证数据库操作
-- 测试并发执行场景
+## 8. 关键特性
 
-### 9.3 性能测试
+### 8.1 智能工具调用
 
-- 压力测试和负载测试
-- 内存泄漏检测
-- 响应时间基准测试
+* 通过LLM理解任务需求
 
-## 10. 扩展性设计
+* 自动选择合适的MCP工具
 
-### 10.1 插件化架构
+* 处理工具调用参数和结果
 
-- 支持自定义工具执行器
-- 可扩展的结果处理器
-- 灵活的报告生成器
+### 8.2 记忆系统集成
 
-### 10.2 分布式支持
+* 统一的PostgreSQL存储
 
-- 支持多实例部署
-- 实现任务分片和负载均衡
-- 提供集群管理功能
+* 结构化的命名空间管理
 
-这份技术文档为 `ExcuteTestAgent` 的实现提供了全面的指导，涵盖了从架构设计到具体实现的各个方面，确保能够构建一个高效、可靠的接口测试执行系
+* 便于后续查询和分析
+
+## 9. 总结
+
+`ExcuteTestAgent` 是一个专注于MCP工具调用的轻量级代理，通过LLM智能理解和执行测试任务，将结果存储到PostgreSQL记忆系统中。该代理与现有的PlanAgent和SharedMemoryManager无缝集成，为自动化测试提供了强大的工具调用能力。
+
+### 9.1 核心优势
+
+* **智能化**: 通过LLM理解任务并选择合适工具
+
+* **简洁性**: 专注于工具调用，避免复杂的状态管理
+
+* **集成性**: 与现有系统完美集成
+
+* **可扩展**: 支持各种MCP工具的调用
+

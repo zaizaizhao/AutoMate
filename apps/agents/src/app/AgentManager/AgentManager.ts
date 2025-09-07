@@ -7,6 +7,7 @@ import { ConfigurableChatModelCallOptions, ConfigurableModel } from 'langchain/c
 import { PlanAgent } from '../Agents/PlanAgent/PlanAgent.js';
 import { MemoryNamespace, SharedMemoryManager } from '../Memory/SharedMemoryManager.js';
 import { END, MessagesAnnotation, START, StateGraph } from '@langchain/langgraph';
+import { ExecuteTestAgent } from '../Agents/TestAgent/Agent/TestAgent.js';
 
 export interface CoordinatorConfig {
     modelName: string;
@@ -34,11 +35,23 @@ export class MultiAgentCoordinator {
             memoryManager: this.memoryManager
         });
 
+        const executeAgent = new ExecuteTestAgent({
+            agentId: 'execute-test-agent-001',
+            agentType: 'testAgent',
+            namespace: this.namespace,
+            memoryManager: this.memoryManager
+        })
+
         const planAgentNode = planAgent.buildGraph();
+        const executeTestAgentNode = executeAgent.buildGraph();
+
         const multiAgentGraph = new StateGraph(MessagesAnnotation)
             .addNode("plan-agent", planAgentNode)
+            .addNode("execute-test-node",executeTestAgentNode)
             .addEdge(START, "plan-agent")
-            .addEdge("plan-agent", END)
+            .addEdge("plan-agent","execute-test-node")
+            .addEdge("execute-test-node","plan-agent")
+            .addEdge("execute-test-node", END)
 
         this.agents.set('research', planAgentNode);
         return multiAgentGraph
