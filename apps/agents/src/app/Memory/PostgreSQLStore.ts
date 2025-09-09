@@ -80,9 +80,78 @@ export class PostgreSQLStore extends BaseStore {
   }
 
   // 实现 batch 方法
-  async batch<Op extends Operation[]>(_operations: Op): Promise<OperationResults<Op>> {
-    // 暂时抛出未实现错误，等待后续完善
-    throw new Error('Batch operations not yet implemented for PostgreSQLStore');
+  async batch<Op extends Operation[]>(operations: Op): Promise<OperationResults<Op>> {
+    const client = await this.pool.connect();
+    const results: any[] = [];
+    
+    try {
+      await client.query('BEGIN');
+      
+      for (const operation of operations) {
+        if ('key' in operation && 'namespace' in operation) {
+          // GetOperation
+          if ('value' in operation) {
+            // PutOperation
+            if (operation.value === null) {
+              // Delete operation
+              await client.query(
+                `DELETE FROM memory_store WHERE namespace_path = $1 AND key = $2`,
+                [operation.namespace, operation.key]
+              );
+              results.push(undefined);
+            } else {
+              // Put operation
+              await client.query(
+                `INSERT INTO memory_store (namespace_path, key, value, updated_at)
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT (namespace_path, key)
+                 DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+                [operation.namespace, operation.key, JSON.stringify(operation.value)]
+              );
+              results.push(undefined);
+            }
+          } else {
+            // GetOperation
+            const getResult = await client.query(
+              `SELECT value FROM memory_store 
+               WHERE namespace_path = $1 AND key = $2
+                 AND (expires_at IS NULL OR expires_at > NOW())`,
+              [operation.namespace, operation.key]
+            );
+            const val = getResult.rows.length > 0 ? getResult.rows[0].value : null;
+            results.push(val ? (typeof val === 'string' ? JSON.parse(val) : val) : null);
+          }
+        } else if ('namespacePrefix' in operation) {
+          // SearchOperation
+          const searchResults = await this.search(
+            operation.namespacePrefix,
+            {
+              limit: operation.limit,
+              offset: operation.offset
+            }
+          );
+          results.push(searchResults);
+        } else if ('matchConditions' in operation) {
+          // ListNamespacesOperation
+          const namespaces = await this.listNamespaces({
+            limit: operation.limit,
+            offset: operation.offset,
+            maxDepth: operation.maxDepth
+          });
+          results.push(namespaces);
+        } else {
+          throw new Error(`Unsupported operation type: ${JSON.stringify(operation)}`);
+        }
+      }
+      
+      await client.query('COMMIT');
+      return results as OperationResults<Op>;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // 新增复杂查询方法

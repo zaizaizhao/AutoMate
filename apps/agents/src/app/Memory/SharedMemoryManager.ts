@@ -28,6 +28,22 @@ export interface TaskPlanedForTest {
   isRequiredValidateByDatabase: boolean;
 }
 
+export interface TaskTest {
+  testId: string;
+  taskId: string;
+  threadId: string;
+  toolName: string;
+  testData: Record<string, any>;
+  testResult?: Record<string, any>;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  errorMessage?: string;
+  executionTimeMs?: number;
+  createdAt: Date;
+  updatedAt: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+}
+
 export interface PlanProgress {
   planId: string;
   totalBatches: number;
@@ -147,6 +163,33 @@ export class SharedMemoryManager {
         CREATE INDEX IF NOT EXISTS idx_plan_progress_plan_id ON plan_progress(plan_id);
         CREATE INDEX IF NOT EXISTS idx_plan_progress_status ON plan_progress(status);
         CREATE INDEX IF NOT EXISTS idx_plan_progress_last_updated ON plan_progress(last_updated DESC);
+      `);
+
+      // 创建 task_test 表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS task_test (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          test_id VARCHAR(255) NOT NULL UNIQUE,
+          task_id VARCHAR(255) NOT NULL,
+          thread_id VARCHAR(255) NOT NULL,
+          tool_name VARCHAR(255) NOT NULL,
+          test_data JSONB NOT NULL,
+          test_result JSONB,
+          status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+          error_message TEXT,
+          execution_time_ms INTEGER,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+          started_at TIMESTAMP WITH TIME ZONE,
+          completed_at TIMESTAMP WITH TIME ZONE
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_task_test_test_id ON task_test(test_id);
+        CREATE INDEX IF NOT EXISTS idx_task_test_task_id ON task_test(task_id);
+        CREATE INDEX IF NOT EXISTS idx_task_test_thread_id ON task_test(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_task_test_tool_name ON task_test(tool_name);
+        CREATE INDEX IF NOT EXISTS idx_task_test_status ON task_test(status);
+        CREATE INDEX IF NOT EXISTS idx_task_test_created_at ON task_test(created_at DESC);
       `);
     } finally {
       client.release();
@@ -828,6 +871,319 @@ export class SharedMemoryManager {
       );
       
       return result.rowCount! > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  // ==================== Task Test Methods ====================
+
+  // 保存测试记录
+  async saveTaskTest(taskTest: Omit<TaskTest, 'createdAt' | 'updatedAt'>): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query(
+        `INSERT INTO task_test (
+          test_id, task_id, thread_id, tool_name, test_data, test_result,
+          status, error_message, execution_time_ms, started_at, completed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (test_id) 
+        DO UPDATE SET 
+          test_result = EXCLUDED.test_result,
+          status = EXCLUDED.status,
+          error_message = EXCLUDED.error_message,
+          execution_time_ms = EXCLUDED.execution_time_ms,
+          updated_at = NOW(),
+          started_at = EXCLUDED.started_at,
+          completed_at = EXCLUDED.completed_at`,
+        [
+          taskTest.testId,
+          taskTest.taskId,
+          taskTest.threadId,
+          taskTest.toolName,
+          JSON.stringify(taskTest.testData),
+          taskTest.testResult ? JSON.stringify(taskTest.testResult) : null,
+          taskTest.status,
+          taskTest.errorMessage,
+          taskTest.executionTimeMs,
+          taskTest.startedAt,
+          taskTest.completedAt
+        ]
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async saveTaskTestBatch(taskTests: Omit<TaskTest, 'createdAt' | 'updatedAt'>[]): Promise<void> {
+    if (taskTests.length === 0) return;
+    
+    const client = await this.pool.connect();
+    try {
+      const query = `
+        INSERT INTO task_test (test_id, task_id, thread_id, tool_name, test_data, test_result, status, error_message, started_at)
+        VALUES ${taskTests.map((_, index) => `($${index * 9 + 1}, $${index * 9 + 2}, $${index * 9 + 3}, $${index * 9 + 4}, $${index * 9 + 5}, $${index * 9 + 6}, $${index * 9 + 7}, $${index * 9 + 8}, $${index * 9 + 9})`).join(', ')}
+      `;
+      
+      const values: any[] = [];
+      taskTests.forEach(taskTest => {
+        values.push(
+          taskTest.testId,
+          taskTest.taskId,
+          taskTest.threadId,
+          taskTest.toolName,
+          JSON.stringify(taskTest.testData),
+          JSON.stringify(taskTest.testResult),
+          taskTest.status,
+          taskTest.errorMessage,
+          taskTest.startedAt || new Date()
+        );
+      });
+      
+      await client.query(query, values);
+    } finally {
+      client.release();
+    }
+  }
+
+  // 批量保存测试记录
+  async saveTaskTests(taskTests: Omit<TaskTest, 'createdAt' | 'updatedAt'>[]): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      for (const taskTest of taskTests) {
+        await client.query(
+          `INSERT INTO task_test (
+            test_id, task_id, thread_id, tool_name, test_data, test_result,
+            status, error_message, execution_time_ms, started_at, completed_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT (test_id) 
+          DO UPDATE SET 
+            test_result = EXCLUDED.test_result,
+            status = EXCLUDED.status,
+            error_message = EXCLUDED.error_message,
+            execution_time_ms = EXCLUDED.execution_time_ms,
+            updated_at = NOW(),
+            started_at = EXCLUDED.started_at,
+            completed_at = EXCLUDED.completed_at`,
+          [
+            taskTest.testId,
+            taskTest.taskId,
+            taskTest.threadId,
+            taskTest.toolName,
+            JSON.stringify(taskTest.testData),
+            taskTest.testResult ? JSON.stringify(taskTest.testResult) : null,
+            taskTest.status,
+            taskTest.errorMessage,
+            taskTest.executionTimeMs,
+            taskTest.startedAt,
+            taskTest.completedAt
+          ]
+        );
+      }
+      
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // 获取测试记录
+  async getTaskTest(testId: string): Promise<TaskTest | null> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result,
+                status, error_message, execution_time_ms, created_at, updated_at,
+                started_at, completed_at
+         FROM task_test
+         WHERE test_id = $1`,
+        [testId]
+      );
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const row = result.rows[0];
+      return {
+        testId: row.test_id,
+        taskId: row.task_id,
+        threadId: row.thread_id,
+        toolName: row.tool_name,
+        testData: typeof row.test_data === 'string' ? JSON.parse(row.test_data) : row.test_data,
+        testResult: row.test_result ? (typeof row.test_result === 'string' ? JSON.parse(row.test_result) : row.test_result) : undefined,
+        status: row.status,
+        errorMessage: row.error_message,
+        executionTimeMs: row.execution_time_ms,
+        createdAt: new Date(row.created_at),
+        updatedAt: new Date(row.updated_at),
+        startedAt: row.started_at ? new Date(row.started_at) : undefined,
+        completedAt: row.completed_at ? new Date(row.completed_at) : undefined
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  // 根据任务ID获取测试记录
+  async getTaskTestsByTaskId(taskId: string): Promise<TaskTest[]> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result,
+                status, error_message, execution_time_ms, created_at, updated_at,
+                started_at, completed_at
+         FROM task_test
+         WHERE task_id = $1
+         ORDER BY created_at ASC`,
+        [taskId]
+      );
+
+      return result.rows.map(row => ({
+        testId: row.test_id,
+        taskId: row.task_id,
+        threadId: row.thread_id,
+        toolName: row.tool_name,
+        testData: typeof row.test_data === 'string' ? JSON.parse(row.test_data) : row.test_data,
+        testResult: row.test_result ? (typeof row.test_result === 'string' ? JSON.parse(row.test_result) : row.test_result) : undefined,
+        status: row.status,
+        errorMessage: row.error_message,
+        executionTimeMs: row.execution_time_ms,
+        createdAt: new Date(row.created_at),
+        updatedAt: new Date(row.updated_at),
+        startedAt: row.started_at ? new Date(row.started_at) : undefined,
+        completedAt: row.completed_at ? new Date(row.completed_at) : undefined
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  // 根据线程ID获取测试记录
+  async getTaskTestsByThreadId(threadId: string): Promise<TaskTest[]> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result,
+                status, error_message, execution_time_ms, created_at, updated_at,
+                started_at, completed_at
+         FROM task_test
+         WHERE thread_id = $1
+         ORDER BY created_at DESC`,
+        [threadId]
+      );
+
+      return result.rows.map(row => ({
+        testId: row.test_id,
+        taskId: row.task_id,
+        threadId: row.thread_id,
+        toolName: row.tool_name,
+        testData: typeof row.test_data === 'string' ? JSON.parse(row.test_data) : row.test_data,
+        testResult: row.test_result ? (typeof row.test_result === 'string' ? JSON.parse(row.test_result) : row.test_result) : undefined,
+        status: row.status,
+        errorMessage: row.error_message,
+        executionTimeMs: row.execution_time_ms,
+        createdAt: new Date(row.created_at),
+        updatedAt: new Date(row.updated_at),
+        startedAt: row.started_at ? new Date(row.started_at) : undefined,
+        completedAt: row.completed_at ? new Date(row.completed_at) : undefined
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  // 更新测试状态
+  async updateTaskTestStatus(testId: string, status: string, result?: any, errorMessage?: string, executionTimeMs?: number): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      const now = new Date();
+      let query = `UPDATE task_test SET status = $1, updated_at = $2`;
+      const params: any[] = [status, now];
+      let paramIndex = 3;
+
+      if (result !== undefined) {
+        query += `, test_result = $${paramIndex}`;
+        params.push(JSON.stringify(result));
+        paramIndex++;
+      }
+
+      if (errorMessage !== undefined) {
+        query += `, error_message = $${paramIndex}`;
+        params.push(errorMessage);
+        paramIndex++;
+      }
+
+      if (executionTimeMs !== undefined) {
+        query += `, execution_time_ms = $${paramIndex}`;
+        params.push(executionTimeMs);
+        paramIndex++;
+      }
+
+      if (status === 'running') {
+        query += `, started_at = $${paramIndex}`;
+        params.push(now);
+        paramIndex++;
+      } else if (status === 'completed' || status === 'failed') {
+        query += `, completed_at = $${paramIndex}`;
+        params.push(now);
+        paramIndex++;
+      }
+
+      query += ` WHERE test_id = $${paramIndex}`;
+      params.push(testId);
+
+      await client.query(query, params);
+    } finally {
+      client.release();
+    }
+  }
+
+  // 删除测试记录
+  async deleteTaskTest(testId: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `DELETE FROM task_test WHERE test_id = $1`,
+        [testId]
+      );
+      
+      return result.rowCount! > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  // 删除任务的所有测试记录
+  async deleteTaskTestsByTaskId(taskId: string): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `DELETE FROM task_test WHERE task_id = $1`,
+        [taskId]
+      );
+      
+      return result.rowCount as number;
+    } finally {
+      client.release();
+    }
+  }
+
+  // 删除线程的所有测试记录
+  async deleteTaskTestsByThreadId(threadId: string): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `DELETE FROM task_test WHERE thread_id = $1`,
+        [threadId]
+      );
+      
+      return result.rowCount as number;
     } finally {
       client.release();
     }

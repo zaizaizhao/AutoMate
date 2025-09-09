@@ -1,10 +1,10 @@
 import { AIMessage } from "@langchain/core/messages";
 import { END, LangGraphRunnableConfig, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { AgentConfig, BaseAgent } from "src/app/BaseAgent/BaseAgent.js";
-import { getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
-import { loadChatModel } from "src/app/ModelUtils/ChatModel.js";
-import { buildSystemPrompt, buildToolInvocationUserPrompt } from "src/app/Agents/TestAgent/Prompts/Prompts.js";
+import { AgentConfig, BaseAgent } from "../../../BaseAgent/BaseAgent.js";
+import { getTestServerTools } from "../../../mcp-servers/mcp-client.js";
+import { loadChatModel } from "../../../ModelUtils/ChatModel.js";
+import { buildSystemPrompt, buildToolInvocationUserPrompt } from "../Prompts/Prompts.js";
 
 // interface TaskPlanedForTest {
 //     id: string;
@@ -45,11 +45,12 @@ export class ExecuteTestAgent extends BaseAgent {
             console.log("[ExcuteTestNode] Initializing LLM...");
             await this.initializellm();
         }
-        const tools = await getTestServerTools();
+        const tools = await getTestServerTools();  
         const toolCallingModel = this.llm.bindTools(tools);
 
         const threadId = (config?.configurable as any)?.thread_id ?? "default";
         const runtimeStore: any = (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+        // 严格的图结构不会使用 primaryStore
         const primaryStore: any = (this.memoryManager?.getStore?.() as any);
         const usingRuntimeStore = !!(runtimeStore && typeof runtimeStore.get === "function");
 
@@ -187,7 +188,7 @@ export class ExecuteTestAgent extends BaseAgent {
                     await primaryStore.put(nsRes, key, record);
                     console.log(`[ExecuteTestNode] Stored tool result to primaryStore memory_store: ns=${JSON.stringify(nsRes)}, key=${key}`);
                 }
-                // 同步更新任务状态到数据库：根据内容判断成功/失败，并记录参数与结果
+                // 更新测试结果到task_test表（使用已存在的testId）
                 if (completedTask?.taskId) {
                     try {
                         const c = lastToolMsg.content as any;
@@ -198,15 +199,80 @@ export class ExecuteTestAgent extends BaseAgent {
                             isError = /error|failed|exception|traceback/i.test(c);
                         }
                         const status = isError ? 'failed' : 'completed';
-                        await this.memoryManager.updateTaskPlanStatus(
-                            completedTask.taskId,
-                            status,
-                            { args: usedArgs, output: lastToolMsg.content },
-                            isError ? (typeof c === 'string' ? c : JSON.stringify(c)) : undefined
-                        );
-                        console.log(`[ExecuteTestNode] Updated task status in DB: ${completedTask.taskId} -> ${status}`);
+                        
+                        // 从执行进度中获取当前测试的testId
+                        const currentTestId = (execProgress as any)?.currentTestId;
+                        
+                        if (currentTestId) {
+                            // 更新已存在的测试记录
+                            await this.memoryManager.updateTaskTestStatus(
+                                currentTestId,
+                                status,
+                                { output: lastToolMsg.content },
+                                isError ? (typeof c === 'string' ? c : JSON.stringify(c)) : undefined
+                            );
+                            console.log(`[ExecuteTestNode] Updated test result: ${currentTestId} with status: ${status}`);
+                        } else {
+                            // 如果没有找到testId，创建新记录（兼容性处理）
+                            const testResult = {
+                                testId: `test_${completedTask.taskId}_${Date.now()}`,
+                                taskId: completedTask.taskId,
+                                threadId: threadId,
+                                toolName: toolName,
+                                testData: usedArgs,
+                                testResult: { output: lastToolMsg.content },
+                                status: status as 'completed' | 'failed',
+                                errorMessage: isError ? (typeof c === 'string' ? c : JSON.stringify(c)) : undefined,
+                                createdAt: new Date(),
+                                updatedAt: new Date(),
+                                completedAt: new Date()
+                            };
+                            
+                            await this.memoryManager.saveTaskTest(testResult);
+                            console.log(`[ExecuteTestNode] Created new test result (fallback): ${testResult.testId}`);
+                        }
+                        
+                        // 处理多条测试数据的情况（如果工具返回多个结果）
+                        if (c && typeof c === 'object') {
+                            let additionalResults: any[] = [];
+                            
+                            if (Array.isArray(c.testData)) {
+                                additionalResults = c.testData.slice(1).map((data: any, index: number) => ({
+                                    testId: `test_${completedTask.taskId}_${Date.now()}_${index + 1}`,
+                                    taskId: completedTask.taskId,
+                                    threadId: threadId,
+                                    toolName: toolName,
+                                    testData: data.input || data,
+                                    testResult: { output: data.output || data.result || data },
+                                    status: (data.error || data.failed) ? 'failed' : 'completed',
+                                    errorMessage: data.error || data.errorMessage,
+                                    createdAt: new Date(),
+                                    updatedAt: new Date(),
+                                    completedAt: new Date()
+                                }));
+                            } else if (Array.isArray(c.results) && c.results.length > 1) {
+                                additionalResults = c.results.slice(1).map((result: any, index: number) => ({
+                                    testId: `test_${completedTask.taskId}_${Date.now()}_${index + 1}`,
+                                    taskId: completedTask.taskId,
+                                    threadId: threadId,
+                                    toolName: toolName,
+                                    testData: usedArgs,
+                                    testResult: { output: result },
+                                    status: (result.error || result.failed) ? 'failed' : 'completed',
+                                    errorMessage: result.error || result.errorMessage,
+                                    createdAt: new Date(),
+                                    updatedAt: new Date(),
+                                    completedAt: new Date()
+                                }));
+                            }
+                            
+                            if (additionalResults.length > 0) {
+                                await this.memoryManager.saveTaskTestBatch(additionalResults);
+                                console.log(`[ExecuteTestNode] Saved ${additionalResults.length} additional test results for task ${completedTask.taskId}`);
+                            }
+                        }
                     } catch (e) {
-                        console.warn(`[ExecuteTestNode] Failed to update task status for ${completedTask?.taskId}:`, e);
+                        console.warn(`[ExecuteTestNode] Failed to update test result for ${completedTask?.taskId}:`, e);
                     }
                 }
 
@@ -283,13 +349,26 @@ export class ExecuteTestAgent extends BaseAgent {
             if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== runtimeStore) {
                 await primaryStore.put(nsExec, "executeProgress", skipped);
             }
-            // 更新任务状态为失败（工具不存在）
+            // 保存工具不存在的测试结果
             if (task?.taskId) {
                 try {
-                    await this.memoryManager.updateTaskPlanStatus(task.taskId, 'failed', undefined, `Tool not found: ${toolName}`);
-                    console.log(`[ExecuteTestNode] Task ${task.taskId} marked as failed: tool not found.`);
+                    const testResult = {
+                        testId: `test_${task.taskId}_${Date.now()}`,
+                        taskId: task.taskId,
+                        threadId: threadId,
+                        toolName: toolName,
+                        testData: {},
+                        testResult: { error: `Tool not found: ${toolName}` },
+                        status: 'failed' as const,
+                        errorMessage: `Tool not found: ${toolName}`,
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    };
+                    
+                    await this.memoryManager.saveTaskTest(testResult);
+                    console.log(`[ExecuteTestNode] Saved failed test result for tool not found: ${testResult.testId}`);
                 } catch (e) {
-                    console.warn(`[ExecuteTestNode] Failed to mark task ${task?.taskId} as failed:`, e);
+                    console.warn(`[ExecuteTestNode] Failed to save test result for ${task?.taskId}:`, e);
                 }
             }
             return { messages: [new AIMessage({ content: `Tool not found for task ${task?.taskId || "unknown"}, skipped.` })] };
@@ -298,12 +377,36 @@ export class ExecuteTestAgent extends BaseAgent {
         const schema = toolDef?.schema ?? toolDef?.input_schema ?? toolDef?.parametersSchema;
         const suggestedParams = (task as any)?.parameters ?? {};
 
-        // 将任务标记为运行中
+        // 创建运行中的测试记录，并保存testId到执行进度中
+        let currentTestId: string | undefined;
         if ((task as any)?.taskId) {
             try {
-                await this.memoryManager.updateTaskPlanStatus((task as any).taskId, 'running');
+                currentTestId = `test_${(task as any).taskId}_${Date.now()}`;
+                const testResult = {
+                    testId: currentTestId,
+                    taskId: (task as any).taskId,
+                    threadId: threadId,
+                    toolName: toolName,
+                    testData: suggestedParams,
+                    status: 'running' as const,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                    startedAt: new Date()
+                };
+                
+                await this.memoryManager.saveTaskTest(testResult);
+                console.log(`[ExecuteTestNode] Created running test record: ${testResult.testId}`);
+                
+                // 将testId保存到执行进度中，以便后续更新使用
+                const progressWithTestId = { ...execProgress, currentTestId };
+                if (usingRuntimeStore && typeof runtimeStore.put === "function") {
+                    await runtimeStore.put(nsExec, "executeProgress", progressWithTestId);
+                }
+                if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== runtimeStore) {
+                    await primaryStore.put(nsExec, "executeProgress", progressWithTestId);
+                }
             } catch (e) {
-                console.warn(`[ExecuteTestNode] Failed to mark task ${(task as any).taskId} as running:`, e);
+                console.warn(`[ExecuteTestNode] Failed to create running test record for ${(task as any).taskId}:`, e);
             }
         }
 
@@ -322,7 +425,6 @@ export class ExecuteTestAgent extends BaseAgent {
             { role: "system", content: buildSystemPrompt() },
             { role: "user", content: userMsg }
         ]);
-        console.log("llmresponse",response);
         
 
         return { messages: [response] };
