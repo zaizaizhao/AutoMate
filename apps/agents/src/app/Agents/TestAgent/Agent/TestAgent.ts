@@ -128,7 +128,7 @@ export class ExecuteTestAgent extends BaseAgent {
         }
 
         // 从数据库读取当前批次的任务（PlanAgent 预先写入 task_plans）
-        const tasks = await this.memoryManager.getTaskPlansByBatch(threadId, batchIndex);
+        let tasks = await this.memoryManager.getTaskPlansByBatch(threadId, batchIndex);
         console.log(`[ExecuteTestNode] Loaded tasks for planId=${threadId}, batch=${batchIndex}: count=${tasks.length}`);
 
         // 执行进度（保存在 store 中）
@@ -249,10 +249,25 @@ export class ExecuteTestAgent extends BaseAgent {
                     await primaryStore.put(nsExec, "executeProgress", newProgress);
                 }
                 console.log(`[ExecuteTestNode] Batch ${batchIndex} completed. Advanced to next batch: ${nextBatch}.`);
-                return { messages: [new AIMessage({ content: `Batch ${batchIndex} execution completed. Advanced to ${nextBatch}.` })] };
+                
+                // 重新加载新批次的任务列表并继续执行
+                const newTasks = await this.memoryManager.getTaskPlansByBatch(threadId, nextBatch);
+                
+                if (!newTasks || newTasks.length === 0) {
+                    return { messages: [new AIMessage({ content: `No tasks for new batch ${nextBatch}.` })] };
+                }
+                
+                // 更新当前状态变量以继续执行新批次
+                batchIndex = nextBatch;
+                tasks = newTasks;
+                execProgress = newProgress;
+                
+                console.log(`[ExecuteTestNode] Continuing with first task of batch ${nextBatch}.`);
+                // 继续执行，不返回，让代码流继续到任务选择逻辑
+            } else {
+                // 没有下一批，结束
+                return { messages: [new AIMessage({ content: `Batch ${batchIndex} execution completed. No further batches.` })] };
             }
-            // 没有下一批，结束
-            return { messages: [new AIMessage({ content: `Batch ${batchIndex} execution completed. No further batches.` })] };
         }
 
         // 选择下一个任务
