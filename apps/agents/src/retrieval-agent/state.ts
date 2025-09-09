@@ -18,7 +18,7 @@ export function reduceDocs(
     | { [key: string]: any }[]
     | string[]
     | string
-    | "delete",
+    | "delete"
 ) {
   // Supports deletion by returning an empty array when "delete" is specified
   if (newDocs === "delete") {

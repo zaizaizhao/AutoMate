@@ -28,7 +28,7 @@ export function formatDocs(docs?: Document[]): string {
  * @returns A Promise that resolves to a BaseChatModel instance.
  */
 export async function loadChatModel(
-  fullySpecifiedName: string,
+  fullySpecifiedName: string
 ): Promise<BaseChatModel> {
   const index = fullySpecifiedName.indexOf("/");
   if (index === -1) {

@@ -41,7 +41,6 @@ Constraints:
 
 System time: {system_time}`;
 
-
 // export const SYSTEM_PROMPT_TEMPLATE = `You are a helpful AI assistant with access to various chart generation tools.
 // You can create different types of charts including bar charts, line charts, pie charts, and many others.
 // When a user asks you to create a chart, analyze their request and use the appropriate tool to generate the chart.
@@ -49,7 +48,7 @@ System time: {system_time}`;
 
 // Available chart types include:
 // - Bar Chart (柱状图): generateBarChart
-// - Line Chart (折线图): generateLineChart  
+// - Line Chart (折线图): generateLineChart
 // - Pie Chart (饼图): generatePieChart
 // - Area Chart (面积图): generateAreaChart
 // - Scatter Chart (散点图): generateScatterChart

@@ -3,7 +3,7 @@
 // class TaskAnalyzer {
 //     async analyzeToolCatalog(tools: any[]): Promise<TaskAnalysisResult> {
 //     const tasks: ToolTask[] = [];
-    
+
 //     // 1. 解析工具目录，提取任务信息
 //     for (const tool of tools) {
 //       const task: ToolTask = {
@@ -15,8 +15,7 @@
 //       };
 //       tasks.push(task);
 //     }
-    
-    
+
 //     return {
 //       totalTasks: tasks.length,
 //       tasksByComplexity,
@@ -25,5 +24,5 @@
 //       recommendedBatchSize
 //     };
 //   }
-  
+
 // }

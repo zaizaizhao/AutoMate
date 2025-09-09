@@ -10,12 +10,7 @@ import { v4 as uuidv4 } from "uuid";
  */
 export function reduceDocs(
   existing?: Document[],
-  newDocs?:
-    | Document[]
-    | { [key: string]: any }[]
-    | string[]
-    | string
-    | "delete",
+  newDocs?: Document[] | { [key: string]: any }[] | string[] | string | "delete"
 ): Document[] {
   if (newDocs === "delete") {
     return [];

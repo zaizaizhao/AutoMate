@@ -15,7 +15,7 @@ import { loadChatModel } from "../../shared/utils.js";
 
 async function generateQueries(
   state: typeof ResearcherStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof ResearcherStateAnnotation.Update> {
   const Response = z.object({
     queries: z.array(z.string()),
@@ -35,7 +35,7 @@ async function generateQueries(
 
 async function retrieveDocuments(
   state: typeof QueryStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof ResearcherStateAnnotation.Update> {
   const retriever = await makeRetriever(config);
   const response = await retriever.invoke(state.query, config);
@@ -43,10 +43,10 @@ async function retrieveDocuments(
 }
 
 function retrieveInParallel(
-  state: typeof ResearcherStateAnnotation.State,
+  state: typeof ResearcherStateAnnotation.State
 ): Send[] {
   return state.queries.map(
-    (query: string) => new Send("retrieveDocuments", { query }),
+    (query: string) => new Send("retrieveDocuments", { query })
   );
 }
 

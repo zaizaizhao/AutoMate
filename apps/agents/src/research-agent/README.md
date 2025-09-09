@@ -164,7 +164,6 @@ Pinecone is a managed, cloud-native vector database that provides long-term memo
 2. After logging in, generate an API key from the Pinecone console.
 
 3. Create a serverless index:
-
    - Choose a name for your index (e.g., "example-index")
    - Set the dimension based on your embedding model (e.g., 1536 for OpenAI embeddings)
    - Select "cosine" as the metric

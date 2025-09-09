@@ -49,17 +49,17 @@ export function initializeTools(config?: LangGraphRunnableConfig) {
     schema: z.object({
       content: z.string().describe(
         "The main content of the memory. For example: \
-          'User expressed interest in learning about French.'",
+          'User expressed interest in learning about French.'"
       ),
       context: z.string().describe(
         "Additional context for the memory. For example: \
-          'This was mentioned while discussing career options in Europe.'",
+          'This was mentioned while discussing career options in Europe.'"
       ),
       memoryId: z
         .string()
         .optional()
         .describe(
-          "The memory ID to overwrite. Only provide if updating an existing memory.",
+          "The memory ID to overwrite. Only provide if updating an existing memory."
         ),
     }),
   });

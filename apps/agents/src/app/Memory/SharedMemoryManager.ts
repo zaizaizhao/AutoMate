@@ -1,8 +1,8 @@
 // memory/SharedMemoryManager.ts
-import { Pool } from 'pg';
-import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres';
+import { Pool } from "pg";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 // import { BaseStore } from '@langchain/langgraph'; // 暂时注释掉未使用的导入
-import { PostgreSQLStore } from './PostgreSQLStore.js';
+import { PostgreSQLStore } from "./PostgreSQLStore.js";
 
 export interface MemoryNamespace {
   project: string;
@@ -24,7 +24,7 @@ export interface TaskPlanedForTest {
   toolName: string;
   description: string;
   parameters: Record<string, any> | string;
-  complexity: 'low' | 'medium' | 'high';
+  complexity: "low" | "medium" | "high";
   isRequiredValidateByDatabase: boolean;
 }
 
@@ -35,7 +35,7 @@ export interface TaskTest {
   toolName: string;
   testData: Record<string, any>;
   testResult?: Record<string, any>;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: "pending" | "running" | "completed" | "failed";
   errorMessage?: string;
   executionTimeMs?: number;
   createdAt: Date;
@@ -84,7 +84,7 @@ export class SharedMemoryManager {
   async initialize(): Promise<void> {
     // 初始化检查点表
     await this.checkpointer.setup();
-    
+
     // 初始化自定义表
     await this.setupCustomTables();
   }
@@ -198,7 +198,11 @@ export class SharedMemoryManager {
 
   // 获取命名空间路径
   private getNamespacePath(namespace: MemoryNamespace): string[] {
-    const path = [namespace.project, namespace.environment, namespace.agent_type];
+    const path = [
+      namespace.project,
+      namespace.environment,
+      namespace.agent_type,
+    ];
     if (namespace.session_id) {
       path.push(namespace.session_id);
     }
@@ -216,7 +220,7 @@ export class SharedMemoryManager {
     }
   ): Promise<void> {
     const namespacePath = this.getNamespacePath(namespace);
-    const expiresAt = options?.expiresIn 
+    const expiresAt = options?.expiresIn
       ? new Date(Date.now() + options.expiresIn * 1000)
       : null;
 
@@ -236,7 +240,7 @@ export class SharedMemoryManager {
           key,
           JSON.stringify(value),
           expiresAt,
-          JSON.stringify(options?.metadata || {})
+          JSON.stringify(options?.metadata || {}),
         ]
       );
     } finally {
@@ -250,7 +254,7 @@ export class SharedMemoryManager {
     key: string
   ): Promise<SharedMemoryItem | null> {
     const namespacePath = this.getNamespacePath(namespace);
-    
+
     const client = await this.pool.connect();
     try {
       const result = await client.query(
@@ -272,7 +276,7 @@ export class SharedMemoryManager {
       // 2) 普通明文字符串（不能 parse，需要直接返回）
       // 3) 已经是对象
       let parsedValue: any = row.value;
-      if (typeof parsedValue === 'string') {
+      if (typeof parsedValue === "string") {
         try {
           parsedValue = JSON.parse(parsedValue);
         } catch {
@@ -281,7 +285,7 @@ export class SharedMemoryManager {
       }
 
       let parsedMetadata: any = row.metadata ?? {};
-      if (typeof parsedMetadata === 'string') {
+      if (typeof parsedMetadata === "string") {
         try {
           parsedMetadata = JSON.parse(parsedMetadata);
         } catch {
@@ -293,7 +297,7 @@ export class SharedMemoryManager {
         key: row.key,
         value: parsedValue,
         metadata: parsedMetadata || {},
-        expiresAt: row.expires_at ? new Date(row.expires_at) : undefined
+        expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
       };
     } finally {
       client.release();
@@ -310,28 +314,28 @@ export class SharedMemoryManager {
     }
   ): Promise<SharedMemoryItem[]> {
     const namespacePath = this.getNamespacePath(namespace);
-    
+
     let query = `
       SELECT key, value, metadata, expires_at, updated_at
       FROM memory_store
       WHERE namespace_path = $1
         AND (expires_at IS NULL OR expires_at > NOW())
     `;
-    
+
     const params: any[] = [namespacePath];
-    
+
     if (options?.prefix) {
       query += ` AND key LIKE $${params.length + 1}`;
       params.push(`${options.prefix}%`);
     }
-    
+
     query += ` ORDER BY updated_at DESC`;
-    
+
     if (options?.limit) {
       query += ` LIMIT $${params.length + 1}`;
       params.push(options.limit);
     }
-    
+
     if (options?.offset) {
       query += ` OFFSET $${params.length + 1}`;
       params.push(options.offset);
@@ -340,12 +344,17 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(query, params);
-      
-      return result.rows.map(row => ({
+
+      return result.rows.map((row) => ({
         key: row.key,
-        value: typeof row.value === 'string' ? JSON.parse(row.value) : row.value,
-        metadata: row.metadata ? (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) : {},
-        expiresAt: row.expires_at ? new Date(row.expires_at) : undefined
+        value:
+          typeof row.value === "string" ? JSON.parse(row.value) : row.value,
+        metadata: row.metadata
+          ? typeof row.metadata === "string"
+            ? JSON.parse(row.metadata)
+            : row.metadata
+          : {},
+        expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
       }));
     } finally {
       client.release();
@@ -358,14 +367,14 @@ export class SharedMemoryManager {
     key: string
   ): Promise<boolean> {
     const namespacePath = this.getNamespacePath(namespace);
-    
+
     const client = await this.pool.connect();
     try {
       const result = await client.query(
         `DELETE FROM memory_store WHERE namespace_path = $1 AND key = $2`,
         [namespacePath, key]
       );
-      
+
       return result.rowCount! > 0;
     } finally {
       client.release();
@@ -379,7 +388,7 @@ export class SharedMemoryManager {
       const result = await client.query(
         `DELETE FROM memory_store WHERE expires_at IS NOT NULL AND expires_at < NOW()`
       );
-      
+
       return result.rowCount as number;
     } finally {
       client.release();
@@ -424,7 +433,7 @@ export class SharedMemoryManager {
           task.description,
           JSON.stringify(task.parameters),
           task.complexity,
-          task.isRequiredValidateByDatabase
+          task.isRequiredValidateByDatabase,
         ]
       );
     } finally {
@@ -433,11 +442,14 @@ export class SharedMemoryManager {
   }
 
   // 批量保存任务计划
-  async saveTaskPlans(planId: string, tasks: TaskPlanedForTest[]): Promise<void> {
+  async saveTaskPlans(
+    planId: string,
+    tasks: TaskPlanedForTest[]
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
-      await client.query('BEGIN');
-      
+      await client.query("BEGIN");
+
       for (const task of tasks) {
         await client.query(
           `INSERT INTO task_plans (
@@ -461,14 +473,14 @@ export class SharedMemoryManager {
             task.description,
             JSON.stringify(task.parameters),
             task.complexity,
-            task.isRequiredValidateByDatabase
+            task.isRequiredValidateByDatabase,
           ]
         );
       }
-      
-      await client.query('COMMIT');
+
+      await client.query("COMMIT");
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
@@ -496,9 +508,12 @@ export class SharedMemoryManager {
         taskId: row.task_id,
         toolName: row.tool_name,
         description: row.description,
-        parameters: typeof row.parameters === 'string' ? JSON.parse(row.parameters) : row.parameters,
+        parameters:
+          typeof row.parameters === "string"
+            ? JSON.parse(row.parameters)
+            : row.parameters,
         complexity: row.complexity,
-        isRequiredValidateByDatabase: row.is_required_validate_by_database
+        isRequiredValidateByDatabase: row.is_required_validate_by_database,
       };
     } finally {
       client.release();
@@ -506,7 +521,10 @@ export class SharedMemoryManager {
   }
 
   // 按批次获取任务计划
-  async getTaskPlansByBatch(planId: string, batchIndex: number): Promise<TaskPlanedForTest[]> {
+  async getTaskPlansByBatch(
+    planId: string,
+    batchIndex: number
+  ): Promise<TaskPlanedForTest[]> {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
@@ -517,14 +535,17 @@ export class SharedMemoryManager {
         [planId, batchIndex]
       );
 
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         batchIndex: row.batch_index,
         taskId: row.task_id,
         toolName: row.tool_name,
         description: row.description,
-        parameters: typeof row.parameters === 'string' ? JSON.parse(row.parameters) : row.parameters,
+        parameters:
+          typeof row.parameters === "string"
+            ? JSON.parse(row.parameters)
+            : row.parameters,
         complexity: row.complexity,
-        isRequiredValidateByDatabase: row.is_required_validate_by_database
+        isRequiredValidateByDatabase: row.is_required_validate_by_database,
       }));
     } finally {
       client.release();
@@ -543,14 +564,17 @@ export class SharedMemoryManager {
         [planId]
       );
 
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         batchIndex: row.batch_index,
         taskId: row.task_id,
         toolName: row.tool_name,
         description: row.description,
-        parameters: typeof row.parameters === 'string' ? JSON.parse(row.parameters) : row.parameters,
+        parameters:
+          typeof row.parameters === "string"
+            ? JSON.parse(row.parameters)
+            : row.parameters,
         complexity: row.complexity,
-        isRequiredValidateByDatabase: row.is_required_validate_by_database
+        isRequiredValidateByDatabase: row.is_required_validate_by_database,
       }));
     } finally {
       client.release();
@@ -558,7 +582,12 @@ export class SharedMemoryManager {
   }
 
   // 更新任务状态
-  async updateTaskPlanStatus(taskId: string, status: string, result?: any, errorMessage?: string): Promise<void> {
+  async updateTaskPlanStatus(
+    taskId: string,
+    status: string,
+    result?: any,
+    errorMessage?: string
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       const now = new Date();
@@ -578,11 +607,11 @@ export class SharedMemoryManager {
         paramIndex++;
       }
 
-      if (status === 'running') {
+      if (status === "running") {
         query += `, started_at = $${paramIndex}`;
         params.push(now);
         paramIndex++;
-      } else if (status === 'completed' || status === 'failed') {
+      } else if (status === "completed" || status === "failed") {
         query += `, completed_at = $${paramIndex}`;
         params.push(now);
         paramIndex++;
@@ -605,7 +634,7 @@ export class SharedMemoryManager {
         `DELETE FROM task_plans WHERE task_id = $1`,
         [taskId]
       );
-      
+
       return result.rowCount! > 0;
     } finally {
       client.release();
@@ -620,7 +649,7 @@ export class SharedMemoryManager {
         `DELETE FROM task_plans WHERE plan_id = $1`,
         [planId]
       );
-      
+
       return result.rowCount as number;
     } finally {
       client.release();
@@ -653,7 +682,7 @@ export class SharedMemoryManager {
           progress.failedBatches,
           progress.currentBatchIndex,
           progress.overallSuccessRate,
-          progress.lastUpdated
+          progress.lastUpdated,
         ]
       );
     } finally {
@@ -685,7 +714,7 @@ export class SharedMemoryManager {
         failedBatches: row.failed_batches,
         currentBatchIndex: row.current_batch_index,
         overallSuccessRate: parseFloat(row.overall_success_rate),
-        lastUpdated: new Date(row.last_updated)
+        lastUpdated: new Date(row.last_updated),
       };
     } finally {
       client.release();
@@ -693,7 +722,10 @@ export class SharedMemoryManager {
   }
 
   // 更新计划进度
-  async updatePlanProgress(planId: string, updates: Partial<PlanProgress>): Promise<void> {
+  async updatePlanProgress(
+    planId: string,
+    updates: Partial<PlanProgress>
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       const setParts: string[] = [];
@@ -736,7 +768,7 @@ export class SharedMemoryManager {
 
       params.push(planId);
 
-      const query = `UPDATE plan_progress SET ${setParts.join(', ')} WHERE plan_id = $${paramIndex}`;
+      const query = `UPDATE plan_progress SET ${setParts.join(", ")} WHERE plan_id = $${paramIndex}`;
       await client.query(query, params);
     } finally {
       client.release();
@@ -776,7 +808,10 @@ export class SharedMemoryManager {
   }
 
   // 更新当前批次索引
-  async updateCurrentBatchIndex(planId: string, batchIndex: number): Promise<void> {
+  async updateCurrentBatchIndex(
+    planId: string,
+    batchIndex: number
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query(
@@ -811,7 +846,7 @@ export class SharedMemoryManager {
       }
 
       const successRate = parseFloat(result.rows[0].success_rate);
-      
+
       // 更新数据库中的成功率
       await client.query(
         `UPDATE plan_progress 
@@ -847,14 +882,14 @@ export class SharedMemoryManager {
 
       const result = await client.query(query, params);
 
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         planId: row.plan_id,
         totalBatches: row.total_batches,
         completedBatches: row.completed_batches,
         failedBatches: row.failed_batches,
         currentBatchIndex: row.current_batch_index,
         overallSuccessRate: parseFloat(row.overall_success_rate),
-        lastUpdated: new Date(row.last_updated)
+        lastUpdated: new Date(row.last_updated),
       }));
     } finally {
       client.release();
@@ -869,7 +904,7 @@ export class SharedMemoryManager {
         `DELETE FROM plan_progress WHERE plan_id = $1`,
         [planId]
       );
-      
+
       return result.rowCount! > 0;
     } finally {
       client.release();
@@ -879,7 +914,9 @@ export class SharedMemoryManager {
   // ==================== Task Test Methods ====================
 
   // 保存测试记录
-  async saveTaskTest(taskTest: Omit<TaskTest, 'createdAt' | 'updatedAt'>): Promise<void> {
+  async saveTaskTest(
+    taskTest: Omit<TaskTest, "createdAt" | "updatedAt">
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query(
@@ -907,7 +944,7 @@ export class SharedMemoryManager {
           taskTest.errorMessage,
           taskTest.executionTimeMs,
           taskTest.startedAt,
-          taskTest.completedAt
+          taskTest.completedAt,
         ]
       );
     } finally {
@@ -915,18 +952,20 @@ export class SharedMemoryManager {
     }
   }
 
-  async saveTaskTestBatch(taskTests: Omit<TaskTest, 'createdAt' | 'updatedAt'>[]): Promise<void> {
+  async saveTaskTestBatch(
+    taskTests: Omit<TaskTest, "createdAt" | "updatedAt">[]
+  ): Promise<void> {
     if (taskTests.length === 0) return;
-    
+
     const client = await this.pool.connect();
     try {
       const query = `
         INSERT INTO task_test (test_id, task_id, thread_id, tool_name, test_data, test_result, status, error_message, started_at)
-        VALUES ${taskTests.map((_, index) => `($${index * 9 + 1}, $${index * 9 + 2}, $${index * 9 + 3}, $${index * 9 + 4}, $${index * 9 + 5}, $${index * 9 + 6}, $${index * 9 + 7}, $${index * 9 + 8}, $${index * 9 + 9})`).join(', ')}
+        VALUES ${taskTests.map((_, index) => `($${index * 9 + 1}, $${index * 9 + 2}, $${index * 9 + 3}, $${index * 9 + 4}, $${index * 9 + 5}, $${index * 9 + 6}, $${index * 9 + 7}, $${index * 9 + 8}, $${index * 9 + 9})`).join(", ")}
       `;
-      
+
       const values: any[] = [];
-      taskTests.forEach(taskTest => {
+      taskTests.forEach((taskTest) => {
         values.push(
           taskTest.testId,
           taskTest.taskId,
@@ -939,7 +978,7 @@ export class SharedMemoryManager {
           taskTest.startedAt || new Date()
         );
       });
-      
+
       await client.query(query, values);
     } finally {
       client.release();
@@ -947,11 +986,13 @@ export class SharedMemoryManager {
   }
 
   // 批量保存测试记录
-  async saveTaskTests(taskTests: Omit<TaskTest, 'createdAt' | 'updatedAt'>[]): Promise<void> {
+  async saveTaskTests(
+    taskTests: Omit<TaskTest, "createdAt" | "updatedAt">[]
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
-      await client.query('BEGIN');
-      
+      await client.query("BEGIN");
+
       for (const taskTest of taskTests) {
         await client.query(
           `INSERT INTO task_test (
@@ -978,14 +1019,14 @@ export class SharedMemoryManager {
             taskTest.errorMessage,
             taskTest.executionTimeMs,
             taskTest.startedAt,
-            taskTest.completedAt
+            taskTest.completedAt,
           ]
         );
       }
-      
-      await client.query('COMMIT');
+
+      await client.query("COMMIT");
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
@@ -1015,15 +1056,22 @@ export class SharedMemoryManager {
         taskId: row.task_id,
         threadId: row.thread_id,
         toolName: row.tool_name,
-        testData: typeof row.test_data === 'string' ? JSON.parse(row.test_data) : row.test_data,
-        testResult: row.test_result ? (typeof row.test_result === 'string' ? JSON.parse(row.test_result) : row.test_result) : undefined,
+        testData:
+          typeof row.test_data === "string"
+            ? JSON.parse(row.test_data)
+            : row.test_data,
+        testResult: row.test_result
+          ? typeof row.test_result === "string"
+            ? JSON.parse(row.test_result)
+            : row.test_result
+          : undefined,
         status: row.status,
         errorMessage: row.error_message,
         executionTimeMs: row.execution_time_ms,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.updated_at),
         startedAt: row.started_at ? new Date(row.started_at) : undefined,
-        completedAt: row.completed_at ? new Date(row.completed_at) : undefined
+        completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
       };
     } finally {
       client.release();
@@ -1044,20 +1092,27 @@ export class SharedMemoryManager {
         [taskId]
       );
 
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         testId: row.test_id,
         taskId: row.task_id,
         threadId: row.thread_id,
         toolName: row.tool_name,
-        testData: typeof row.test_data === 'string' ? JSON.parse(row.test_data) : row.test_data,
-        testResult: row.test_result ? (typeof row.test_result === 'string' ? JSON.parse(row.test_result) : row.test_result) : undefined,
+        testData:
+          typeof row.test_data === "string"
+            ? JSON.parse(row.test_data)
+            : row.test_data,
+        testResult: row.test_result
+          ? typeof row.test_result === "string"
+            ? JSON.parse(row.test_result)
+            : row.test_result
+          : undefined,
         status: row.status,
         errorMessage: row.error_message,
         executionTimeMs: row.execution_time_ms,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.updated_at),
         startedAt: row.started_at ? new Date(row.started_at) : undefined,
-        completedAt: row.completed_at ? new Date(row.completed_at) : undefined
+        completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
       }));
     } finally {
       client.release();
@@ -1078,20 +1133,27 @@ export class SharedMemoryManager {
         [threadId]
       );
 
-      return result.rows.map(row => ({
+      return result.rows.map((row) => ({
         testId: row.test_id,
         taskId: row.task_id,
         threadId: row.thread_id,
         toolName: row.tool_name,
-        testData: typeof row.test_data === 'string' ? JSON.parse(row.test_data) : row.test_data,
-        testResult: row.test_result ? (typeof row.test_result === 'string' ? JSON.parse(row.test_result) : row.test_result) : undefined,
+        testData:
+          typeof row.test_data === "string"
+            ? JSON.parse(row.test_data)
+            : row.test_data,
+        testResult: row.test_result
+          ? typeof row.test_result === "string"
+            ? JSON.parse(row.test_result)
+            : row.test_result
+          : undefined,
         status: row.status,
         errorMessage: row.error_message,
         executionTimeMs: row.execution_time_ms,
         createdAt: new Date(row.created_at),
         updatedAt: new Date(row.updated_at),
         startedAt: row.started_at ? new Date(row.started_at) : undefined,
-        completedAt: row.completed_at ? new Date(row.completed_at) : undefined
+        completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
       }));
     } finally {
       client.release();
@@ -1099,7 +1161,13 @@ export class SharedMemoryManager {
   }
 
   // 更新测试状态
-  async updateTaskTestStatus(testId: string, status: string, result?: any, errorMessage?: string, executionTimeMs?: number): Promise<void> {
+  async updateTaskTestStatus(
+    testId: string,
+    status: string,
+    result?: any,
+    errorMessage?: string,
+    executionTimeMs?: number
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       const now = new Date();
@@ -1125,11 +1193,11 @@ export class SharedMemoryManager {
         paramIndex++;
       }
 
-      if (status === 'running') {
+      if (status === "running") {
         query += `, started_at = $${paramIndex}`;
         params.push(now);
         paramIndex++;
-      } else if (status === 'completed' || status === 'failed') {
+      } else if (status === "completed" || status === "failed") {
         query += `, completed_at = $${paramIndex}`;
         params.push(now);
         paramIndex++;
@@ -1152,7 +1220,7 @@ export class SharedMemoryManager {
         `DELETE FROM task_test WHERE test_id = $1`,
         [testId]
       );
-      
+
       return result.rowCount! > 0;
     } finally {
       client.release();
@@ -1167,7 +1235,7 @@ export class SharedMemoryManager {
         `DELETE FROM task_test WHERE task_id = $1`,
         [taskId]
       );
-      
+
       return result.rowCount as number;
     } finally {
       client.release();
@@ -1182,7 +1250,7 @@ export class SharedMemoryManager {
         `DELETE FROM task_test WHERE thread_id = $1`,
         [threadId]
       );
-      
+
       return result.rowCount as number;
     } finally {
       client.release();

@@ -1,4 +1,9 @@
-import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
+import {
+  END,
+  MessagesAnnotation,
+  START,
+  StateGraph,
+} from "@langchain/langgraph";
 import { BaseAgent, AgentConfig } from "../../BaseAgent/BaseAgent.js";
 
 import { AIMessage } from "@langchain/core/messages";
@@ -9,9 +14,6 @@ import { TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
 import { getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
 import { planOutputSchema } from "./StructuredOutputSchema.js";
-
-
-
 
 export class PlanAgent extends BaseAgent {
   private llm: any;
@@ -26,10 +28,16 @@ export class PlanAgent extends BaseAgent {
     this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
   }
 
-  async planNode(state: typeof MessagesAnnotation.State, config: LangGraphRunnableConfig) {
+  async planNode(
+    state: typeof MessagesAnnotation.State,
+    config: LangGraphRunnableConfig
+  ) {
     //通过state.messages来获取传入的消息
     // 多轮planNode的调用 thread_id保持不变
-    console.log("[PlanAgent] config thread_id:", config?.configurable?.thread_id);
+    console.log(
+      "[PlanAgent] config thread_id:",
+      config?.configurable?.thread_id
+    );
 
     // 确保LLM已初始化
     if (!this.llm) {
@@ -44,7 +52,8 @@ export class PlanAgent extends BaseAgent {
     this.lastThreadId = threadId;
     const batchMemKey = `planNode:${threadId}:toolBatch`;
     // 优先使用运行时传入的 store；若不存在则回退为全局 MemoryManager 的 store，确保多轮调用一致可见
-    const store: any = (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+    const store: any =
+      (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
     const usingStore = !!(store && typeof store.get === "function");
     const ns = [
       "plans",
@@ -58,10 +67,16 @@ export class PlanAgent extends BaseAgent {
     const existingBatchStateRaw = usingStore
       ? await store.get(ns, "toolBatch")
       : await this.getSharedMemory(batchMemKey);
-    const existingBatchState = (existingBatchStateRaw && typeof existingBatchStateRaw === "object" && "value" in (existingBatchStateRaw as any))
-      ? (existingBatchStateRaw as any).value
-      : existingBatchStateRaw;
-    console.log(`[PlanAgent] Read batchState via ${usingStore ? 'store' : 'sharedMemory'} (normalized):`, existingBatchState);
+    const existingBatchState =
+      existingBatchStateRaw &&
+      typeof existingBatchStateRaw === "object" &&
+      "value" in (existingBatchStateRaw as any)
+        ? (existingBatchStateRaw as any).value
+        : existingBatchStateRaw;
+    console.log(
+      `[PlanAgent] Read batchState via ${usingStore ? "store" : "sharedMemory"} (normalized):`,
+      existingBatchState
+    );
     const toolsPerBatch = existingBatchState?.toolsPerBatch ?? 5;
     const totalTools = tools.length;
     const totalBatches = Math.ceil(totalTools / toolsPerBatch);
@@ -69,13 +84,18 @@ export class PlanAgent extends BaseAgent {
     const startIndex = batchIndex * toolsPerBatch;
     const endIndex = startIndex + toolsPerBatch;
 
-    console.log(`[PlanAgent] Batch info: threadId=${threadId}, batchIndex=${batchIndex}, toolsPerBatch=${toolsPerBatch}, totalTools=${totalTools}, totalBatches=${totalBatches}, slice=[${startIndex}, ${endIndex})`);
+    console.log(
+      `[PlanAgent] Batch info: threadId=${threadId}, batchIndex=${batchIndex}, toolsPerBatch=${toolsPerBatch}, totalTools=${totalTools}, totalBatches=${totalBatches}, slice=[${startIndex}, ${endIndex})`
+    );
     // 计算当前批次应注入的工具子集
     const selectedTools = tools.slice(startIndex, endIndex);
 
     // 如果当前批次已经存在任务，跳过LLM规划，直接推进到下一批（幂等保障）
     try {
-      const existingTasksForBatch = await this.getBatchTasks(threadId, batchIndex);
+      const existingTasksForBatch = await this.getBatchTasks(
+        threadId,
+        batchIndex
+      );
       if (existingTasksForBatch && existingTasksForBatch.length > 0) {
         if (startIndex < totalTools) {
           const nextBatchIndex = Math.min(batchIndex + 1, totalBatches);
@@ -92,26 +112,49 @@ export class PlanAgent extends BaseAgent {
             await store.put(ns, "toolBatch", newState);
             wroteRuntime = true;
           }
-          if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== store) {
+          if (
+            primaryStore &&
+            typeof primaryStore.put === "function" &&
+            primaryStore !== store
+          ) {
             await primaryStore.put(ns, "toolBatch", newState);
             wrotePrimary = true;
           }
           if (!wroteRuntime && !wrotePrimary) {
             await this.saveSharedMemory(batchMemKey, newState);
           }
-          const targets = [wroteRuntime ? "runtimeStore" : null, wrotePrimary ? "primaryStore(DB)" : null]
-            .filter(Boolean)
-            .join(" & ") || "sharedMemory";
-          console.log(`[PlanAgent] Detected existing tasks for plan=${threadId}, batch=${batchIndex}. Skipping re-plan and advancing to ${nextBatchIndex}. Persisted batchState to: ${targets}`);
+          const targets =
+            [
+              wroteRuntime ? "runtimeStore" : null,
+              wrotePrimary ? "primaryStore(DB)" : null,
+            ]
+              .filter(Boolean)
+              .join(" & ") || "sharedMemory";
+          console.log(
+            `[PlanAgent] Detected existing tasks for plan=${threadId}, batch=${batchIndex}. Skipping re-plan and advancing to ${nextBatchIndex}. Persisted batchState to: ${targets}`
+          );
         }
-        return { messages: [new AIMessage({ content: `检测到批次 ${batchIndex} 已有任务，跳过规划并推进下一批。` })] };
+        return {
+          messages: [
+            new AIMessage({
+              content: `检测到批次 ${batchIndex} 已有任务，跳过规划并推进下一批。`,
+            }),
+          ],
+        };
       }
     } catch (e) {
-      console.warn("[PlanAgent] Failed to check existing tasks for idempotency:", e);
+      console.warn(
+        "[PlanAgent] Failed to check existing tasks for idempotency:",
+        e
+      );
     }
 
     // 如果是首次或工具清单发生变化，则（重新）保存批次元信息
-    if (!existingBatchState || existingBatchState.totalTools !== totalTools || existingBatchState.toolsPerBatch !== toolsPerBatch) {
+    if (
+      !existingBatchState ||
+      existingBatchState.totalTools !== totalTools ||
+      existingBatchState.toolsPerBatch !== toolsPerBatch
+    ) {
       const payload = {
         batchIndex, // 保持当前批次索引
         toolsPerBatch,
@@ -125,69 +168,94 @@ export class PlanAgent extends BaseAgent {
         await store.put(ns, "toolBatch", payload);
         wroteRuntime = true;
       }
-      if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== store) {
+      if (
+        primaryStore &&
+        typeof primaryStore.put === "function" &&
+        primaryStore !== store
+      ) {
         await primaryStore.put(ns, "toolBatch", payload);
         wrotePrimary = true;
       }
       if (!wroteRuntime && !wrotePrimary) {
         await this.saveSharedMemory(batchMemKey, payload);
       }
-      const targets = [wroteRuntime ? "runtimeStore" : null, wrotePrimary ? "primaryStore(DB)" : null]
-        .filter(Boolean)
-        .join(" & ") || "sharedMemory";
-      console.log(`[PlanAgent] Initialized/updated batch meta. Persisted to: ${targets}`);
+      const targets =
+        [
+          wroteRuntime ? "runtimeStore" : null,
+          wrotePrimary ? "primaryStore(DB)" : null,
+        ]
+          .filter(Boolean)
+          .join(" & ") || "sharedMemory";
+      console.log(
+        `[PlanAgent] Initialized/updated batch meta. Persisted to: ${targets}`
+      );
     }
 
     const selectedToolMeta = selectedTools.map((t: any) => ({
       name: t?.name ?? t?.toolName ?? "",
       description: t?.description ?? "",
       // 兼容多种工具实现的schema字段命名
-      inputSchema: t?.schema ?? t?.input_schema ?? t?.parametersSchema ?? undefined,
+      inputSchema:
+        t?.schema ?? t?.input_schema ?? t?.parametersSchema ?? undefined,
     }));
 
     let systemPrompt = TOOL_MESSAGE_EXTRACT_PROMPT.replace(
       "{system_time}",
-      new Date().toISOString(),
+      new Date().toISOString()
     );
 
     // 当前批次的信息，帮助模型在输出中设置正确的 batchIndex，并仅围绕该批次工具生成任务
-    const batchInfoContext = `You are generating test tasks ONLY for the current tool batch.\n` +
-      `BATCH_INFO=\n${JSON.stringify({
-        threadId,
-        batchIndex,
-        totalBatches,
-        toolsPerBatch,
-        totalTools,
-        startIndex,
-        endIndex: Math.min(endIndex, totalTools),
-        toolNames: selectedToolMeta.map((t) => t.name),
-      }, null, 2)}`;
+    const batchInfoContext =
+      `You are generating test tasks ONLY for the current tool batch.\n` +
+      `BATCH_INFO=\n${JSON.stringify(
+        {
+          threadId,
+          batchIndex,
+          totalBatches,
+          toolsPerBatch,
+          totalTools,
+          startIndex,
+          endIndex: Math.min(endIndex, totalTools),
+          toolNames: selectedToolMeta.map((t) => t.name),
+        },
+        null,
+        2
+      )}`;
 
     const toolsContext = `You have the following available tools for THIS BATCH (5 per call). Use the exact value in the \"name\" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\nTOOLS_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}`;
 
     // —— 规划上下文摘要（从共享内存读取，不存在则从最后一条用户指令提取并持久化） ——
     const planningContextKey = `planNode:${threadId}:planningContext`;
-    let planningContextItem = (store && typeof store.get === "function")
-      ? await store.get(ns, "planningContext")
-      : await this.getSharedMemory(planningContextKey);
+    let planningContextItem =
+      store && typeof store.get === "function"
+        ? await store.get(ns, "planningContext")
+        : await this.getSharedMemory(planningContextKey);
     let planningContext: string;
     if (!planningContextItem) {
-      const msgs: any[] = Array.isArray((state as any)?.messages) ? (state as any).messages : [];
+      const msgs: any[] = Array.isArray((state as any)?.messages)
+        ? (state as any).messages
+        : [];
       let lastUserText = "";
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i];
-        const role = m?.role || m?.type || (m as any)?._getType?.() || 'unknown';
+        const role =
+          m?.role || m?.type || (m as any)?._getType?.() || "unknown";
         if (role === "user" || role === "human") {
           const c = m?.content;
           if (typeof c === "string") {
             lastUserText = c;
           } else {
-            try { lastUserText = JSON.stringify(c); } catch { lastUserText = String(c); }
+            try {
+              lastUserText = JSON.stringify(c);
+            } catch {
+              lastUserText = String(c);
+            }
           }
           break;
         }
       }
-      const truncate = (s: string, max = 800) => (s && s.length > max ? s.slice(0, max) + "..." : s);
+      const truncate = (s: string, max = 800) =>
+        s && s.length > max ? s.slice(0, max) + "..." : s;
       const planningContextObj = {
         note: "This is the planning context summary for generating test tasks.",
         userGoal: truncate(lastUserText || "N/A"),
@@ -206,7 +274,10 @@ export class PlanAgent extends BaseAgent {
       }
       planningContext = `PLANNING_CONTEXT=\n${JSON.stringify(planningContextObj, null, 2)}`;
     } else {
-      const ctx = typeof planningContextItem === "string" ? planningContextItem : JSON.stringify(planningContextItem, null, 2);
+      const ctx =
+        typeof planningContextItem === "string"
+          ? planningContextItem
+          : JSON.stringify(planningContextItem, null, 2);
       planningContext = `PLANNING_CONTEXT=\n${ctx}`;
     }
     const planningContextMsg = planningContext;
@@ -241,11 +312,16 @@ export class PlanAgent extends BaseAgent {
         "[PlanAgent] LLM response start:==============================================="
       );
       if (response && typeof response === "object" && "parsed" in response) {
-        console.log("[PlanAgent] Parsed structured output:", (response as any).parsed);
+        console.log(
+          "[PlanAgent] Parsed structured output:",
+          (response as any).parsed
+        );
         // 可选：打印原始消息，便于排查模型是否仍返回markdown
         if ((response as any).raw) {
-
-          console.log("[PlanAgent] Raw message content:", (response as any).raw.content);
+          console.log(
+            "[PlanAgent] Raw message content:",
+            (response as any).raw.content
+          );
         }
         console.log(
           "[PlanAgent] LLM response end:==============================================="
@@ -253,12 +329,19 @@ export class PlanAgent extends BaseAgent {
 
         // —— 持久化当前批次的规划结果到 task_plans ——
         const parsed: any = (response as any).parsed;
-        const tasksArray: any[] = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
-        console.log(`[PlanAgent] Parsed tasks count: ${tasksArray.length} for batch=${batchIndex}`);
+        const tasksArray: any[] = Array.isArray(parsed?.tasks)
+          ? parsed.tasks
+          : [];
+        console.log(
+          `[PlanAgent] Parsed tasks count: ${tasksArray.length} for batch=${batchIndex}`
+        );
         if (tasksArray.length > 0) {
           // 计算当前批次已有的最大顺序号，避免重复
           const existing = await this.getBatchTasks(threadId, batchIndex);
-          const safeThreadId = String(threadId).replace(/[^A-Za-z0-9_.:-]/g, "_");
+          const safeThreadId = String(threadId).replace(
+            /[^A-Za-z0-9_.:-]/g,
+            "_"
+          );
           const prefix = `${safeThreadId}-${batchIndex}-`;
           const maxSeq = existing.reduce((max, it) => {
             const id = (it as any)?.taskId ?? "";
@@ -272,16 +355,23 @@ export class PlanAgent extends BaseAgent {
           let seq = maxSeq + 1;
 
           const toSave = tasksArray.map((t: any) => ({
-            batchIndex: typeof t?.batchIndex === 'number' ? t.batchIndex : (typeof parsed?.batchIndex === 'number' ? parsed.batchIndex : batchIndex),
+            batchIndex:
+              typeof t?.batchIndex === "number"
+                ? t.batchIndex
+                : typeof parsed?.batchIndex === "number"
+                  ? parsed.batchIndex
+                  : batchIndex,
             taskId: `${safeThreadId}-${batchIndex}-${seq++}`,
             toolName: t?.toolName ?? "",
             description: t?.description ?? "",
             parameters: t?.parameters ?? {},
-            complexity: t?.complexity ?? 'medium',
+            complexity: t?.complexity ?? "medium",
             isRequiredValidateByDatabase: !!t?.isRequiredValidateByDatabase,
           }));
 
-          console.log(`[PlanAgent] Persisting ${toSave.length} task(s) to DB. planId=${threadId}, batch=${batchIndex}`);
+          console.log(
+            `[PlanAgent] Persisting ${toSave.length} task(s) to DB. planId=${threadId}, batch=${batchIndex}`
+          );
           try {
             await this.memoryManager.saveTaskPlans(threadId, toSave);
             console.log("[PlanAgent] Task plans saved to DB successfully.");
@@ -289,7 +379,9 @@ export class PlanAgent extends BaseAgent {
             console.error("[PlanAgent] saveTaskPlans error:", e);
           }
         } else {
-          console.log(`[PlanAgent] No tasks produced by LLM for planId=${threadId}, batch=${batchIndex}. Skipping DB persist.`);
+          console.log(
+            `[PlanAgent] No tasks produced by LLM for planId=${threadId}, batch=${batchIndex}. Skipping DB persist.`
+          );
         }
         // 无论本批次是否产生任务，都推进到下一批，避免卡在某个批次
         if (startIndex < totalTools) {
@@ -307,50 +399,70 @@ export class PlanAgent extends BaseAgent {
             await store.put(ns, "toolBatch", newState);
             wroteRuntime = true;
           }
-          if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== store) {
+          if (
+            primaryStore &&
+            typeof primaryStore.put === "function" &&
+            primaryStore !== store
+          ) {
             await primaryStore.put(ns, "toolBatch", newState);
             wrotePrimary = true;
           }
           if (!wroteRuntime && !wrotePrimary) {
             await this.saveSharedMemory(batchMemKey, newState);
           }
-          const targets = [wroteRuntime ? "runtimeStore" : null, wrotePrimary ? "primaryStore(DB)" : null]
-            .filter(Boolean)
-            .join(" & ") || "sharedMemory";
-          console.log(`[PlanAgent] Advanced to next batch: ${batchIndex} -> ${nextBatchIndex}. Persisted batchState to: ${targets}`);
+          const targets =
+            [
+              wroteRuntime ? "runtimeStore" : null,
+              wrotePrimary ? "primaryStore(DB)" : null,
+            ]
+              .filter(Boolean)
+              .join(" & ") || "sharedMemory";
+          console.log(
+            `[PlanAgent] Advanced to next batch: ${batchIndex} -> ${nextBatchIndex}. Persisted batchState to: ${targets}`
+          );
         }
       }
     } catch (error) {
       console.error("[PlanAgent] planning.invoke error:", error);
     }
- 
+
     return { messages: [new AIMessage({ content: "计划生成完成（本批次）" })] };
   }
   // agent执行终端机制
   startOrContinuePlan() {}
 
-  async getBatchTasks(planId: string, batchIndex: number): Promise<TaskPlanedForTest[]> {
+  async getBatchTasks(
+    planId: string,
+    batchIndex: number
+  ): Promise<TaskPlanedForTest[]> {
     try {
       return await this.memoryManager.getTaskPlansByBatch(planId, batchIndex);
     } catch (error) {
-      console.error(`[PlanAgent] Error getting tasks for plan ${planId}, batch ${batchIndex}:`, error);
+      console.error(
+        `[PlanAgent] Error getting tasks for plan ${planId}, batch ${batchIndex}:`,
+        error
+      );
       return [];
     }
   }
 
   async takeActionOrGeneratePlan(
     _state: typeof MessagesAnnotation.State,
-    config: LangGraphRunnableConfig,
+    config: LangGraphRunnableConfig
   ): Promise<"plan-node" | typeof END> {
     try {
-      const threadId = (config?.configurable as any)?.thread_id ?? this.lastThreadId ?? "default";
+      const threadId =
+        (config?.configurable as any)?.thread_id ??
+        this.lastThreadId ??
+        "default";
       if (!threadId) {
         // 首轮或没有获取到 threadId，默认继续到 plan-node
         return "plan-node";
       }
       const batchMemKey = `planNode:${threadId}:toolBatch`;
       // 优先使用运行时传入的 store；若不存在则回退为全局 MemoryManager 的 store，确保多轮调用一致可见
-      const store: any = (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+      const store: any =
+        (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
       const ns = [
         "plans",
         this.config.namespace.project,
@@ -358,18 +470,41 @@ export class PlanAgent extends BaseAgent {
         this.config.namespace.agent_type,
         threadId,
       ];
-      const batchStateRaw = (store && typeof store.get === "function")
-        ? await store.get(ns, "toolBatch")
-        : await this.getSharedMemory(batchMemKey);
-      const batchState = (batchStateRaw && typeof batchStateRaw === "object" && "value" in (batchStateRaw as any))
-        ? (batchStateRaw as any).value as { batchIndex: number; toolsPerBatch: number; totalTools: number; totalBatches: number } | null
-        : batchStateRaw as { batchIndex: number; toolsPerBatch: number; totalTools: number; totalBatches: number } | null;
-      console.log("[PlanAgent] Router read batchState (normalized):", batchState);
+      const batchStateRaw =
+        store && typeof store.get === "function"
+          ? await store.get(ns, "toolBatch")
+          : await this.getSharedMemory(batchMemKey);
+      const batchState =
+        batchStateRaw &&
+        typeof batchStateRaw === "object" &&
+        "value" in (batchStateRaw as any)
+          ? ((batchStateRaw as any).value as {
+              batchIndex: number;
+              toolsPerBatch: number;
+              totalTools: number;
+              totalBatches: number;
+            } | null)
+          : (batchStateRaw as {
+              batchIndex: number;
+              toolsPerBatch: number;
+              totalTools: number;
+              totalBatches: number;
+            } | null);
+      console.log(
+        "[PlanAgent] Router read batchState (normalized):",
+        batchState
+      );
 
-      if (batchState && typeof batchState.batchIndex === 'number' && typeof batchState.totalBatches === 'number') {
+      if (
+        batchState &&
+        typeof batchState.batchIndex === "number" &&
+        typeof batchState.totalBatches === "number"
+      ) {
         // 当 batchIndex >= totalBatches 时，说明所有批次已完成
         if (batchState.batchIndex >= batchState.totalBatches) {
-          console.log(`[PlanAgent] All batches completed (batchIndex=${batchState.batchIndex}, totalBatches=${batchState.totalBatches}). Ending.`);
+          console.log(
+            `[PlanAgent] All batches completed (batchIndex=${batchState.batchIndex}, totalBatches=${batchState.totalBatches}). Ending.`
+          );
           return END;
         }
       }
@@ -387,14 +522,14 @@ export class PlanAgent extends BaseAgent {
       .addConditionalEdges(
         "plan-node",
         this.takeActionOrGeneratePlan.bind(this),
-        ["plan-node", END],
+        ["plan-node", END]
       );
 
     return builder.compile({
       checkpointer: this.memoryManager.getCheckpointer(),
       store: this.memoryManager.getStore(),
       interruptBefore: [],
-      interruptAfter: []
+      interruptAfter: [],
     });
   }
 }

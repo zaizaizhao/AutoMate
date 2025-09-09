@@ -16,7 +16,7 @@ import { reduceDocs } from "../shared/state.js";
 
 async function indexDocs(
   state: typeof IndexStateAnnotation.State,
-  config?: RunnableConfig,
+  config?: RunnableConfig
 ): Promise<typeof IndexStateAnnotation.Update> {
   if (!config) {
     throw new Error("Configuration required to run index_docs.");
@@ -40,7 +40,7 @@ async function indexDocs(
 // Define the graph
 const builder = new StateGraph(
   IndexStateAnnotation,
-  IndexConfigurationAnnotation,
+  IndexConfigurationAnnotation
 )
   .addNode("indexDocs", indexDocs)
   .addEdge(START, "indexDocs")

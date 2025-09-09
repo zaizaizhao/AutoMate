@@ -14,27 +14,26 @@ export interface ToolTask {
   toolName: string;
   description: string;
   parameters: Record<string, any>;
-  complexity: 'low' | 'medium' | 'high';
-  isValidateByDatabase: boolean
+  complexity: "low" | "medium" | "high";
+  isValidateByDatabase: boolean;
 }
 
 // llm输出的batch信息 TaskPlanedForTest[]
 export interface TaskPlanedForTest {
-  batchIndex:number;
+  batchIndex: number;
   taskId: string;
   toolName: string;
   description: string;
   parameters: Record<string, any> | string;
-  complexity: 'low' | 'medium' | 'high';
-  isRequiredValidateByDatabase: boolean
+  complexity: "low" | "medium" | "high";
+  isRequiredValidateByDatabase: boolean;
 }
 
 //llm输出的batch信息 BatchTasks[]
 export interface BatchTasks {
-  batchIndex:number;
-  tasks:TaskPlanedForTest[]
+  batchIndex: number;
+  tasks: TaskPlanedForTest[];
 }
-
 
 // 流程类型定义 (planagent需要获取上次的PlanProgress，以及更新当前的PlanProgress)
 export interface PlanProgress {

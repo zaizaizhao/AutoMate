@@ -5,7 +5,7 @@ import { initChatModel } from "langchain/chat_models/universal";
  * @returns A Promise that resolves to a BaseChatModel instance.
  */
 export async function loadChatModel(
-  fullySpecifiedName: string,
+  fullySpecifiedName: string
 ): Promise<ReturnType<typeof initChatModel>> {
   console.log(fullySpecifiedName);
   const index = fullySpecifiedName.indexOf("/");
@@ -15,15 +15,18 @@ export async function loadChatModel(
   } else {
     const provider = fullySpecifiedName.slice(0, index);
     const model = fullySpecifiedName.slice(index + 1);
-    console.log("this is provider and model",provider,model);
-    console.log("this is openai api base url",process.env.OPENAI_API_BASE_URL);
-    console.log("this is openai api key",process.env.OPENAI_API_KEY);
+    console.log("this is provider and model", provider, model);
+    console.log("this is openai api base url", process.env.OPENAI_API_BASE_URL);
+    console.log("this is openai api key", process.env.OPENAI_API_KEY);
     // Handle different providers
-  if (provider === "openai") {
-    console.log("进入openai初始化");
-    console.log("this is openai api base url",process.env.OPENAI_API_BASE_URL);
-    console.log("this is openai api key",process.env.OPENAI_API_KEY);
-      return await initChatModel(model,{
+    if (provider === "openai") {
+      console.log("进入openai初始化");
+      console.log(
+        "this is openai api base url",
+        process.env.OPENAI_API_BASE_URL
+      );
+      console.log("this is openai api key", process.env.OPENAI_API_KEY);
+      return await initChatModel(model, {
         modelProvider: "openai",
         configuration: {
           baseURL: process.env.OPENAI_API_BASE_URL,

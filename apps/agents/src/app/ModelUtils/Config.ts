@@ -18,15 +18,14 @@ export const ConfigurationSchema = Annotation.Root({
 
 export function ensureConfiguration(
   config: RunnableConfig,
-  prompt: string,
+  prompt: string
 ): typeof ConfigurationSchema.State {
   /**
    * Ensure the defaults are populated.
    */
   const configurable = config.configurable ?? {};
   return {
-    systemPromptTemplate:
-    configurable.systemPromptTemplate ?? prompt,
+    systemPromptTemplate: configurable.systemPromptTemplate ?? prompt,
     model: configurable.model ?? "openai/deepseek-ai/DeepSeek-V3",
   };
 }

@@ -17,7 +17,7 @@ import { getStoreFromConfigOrThrow, splitModelAndProvider } from "./utils.js";
 
 async function callModel(
   state: typeof GraphAnnotation.State,
-  config: LangGraphRunnableConfig,
+  config: LangGraphRunnableConfig
 ): Promise<{ messages: BaseMessage[] }> {
   const llm = await initChatModel();
   const store = getStoreFromConfigOrThrow(config);
@@ -48,7 +48,7 @@ async function callModel(
     [{ role: "system", content: sys }, ...state.messages],
     {
       configurable: splitModelAndProvider(configurable.model),
-    },
+    }
   );
 
   return { messages: [result] };
@@ -56,7 +56,7 @@ async function callModel(
 
 async function storeMemory(
   state: typeof GraphAnnotation.State,
-  config: LangGraphRunnableConfig,
+  config: LangGraphRunnableConfig
 ): Promise<{ messages: BaseMessage[] }> {
   const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
   const toolCalls = lastMessage.tool_calls || [];
@@ -67,14 +67,14 @@ async function storeMemory(
   const savedMemories = await Promise.all(
     toolCalls.map(async (tc) => {
       return await upsertMemoryTool.invoke(tc);
-    }),
+    })
   );
 
   return { messages: savedMemories };
 }
 
 function routeMessage(
-  state: typeof GraphAnnotation.State,
+  state: typeof GraphAnnotation.State
 ): "store_memory" | typeof END {
   const lastMessage = state.messages[state.messages.length - 1] as AIMessage;
   if (lastMessage.tool_calls?.length) {
@@ -88,7 +88,7 @@ export const builder = new StateGraph(
   {
     stateSchema: GraphAnnotation,
   },
-  ConfigurationAnnotation,
+  ConfigurationAnnotation
 )
   .addNode("call_model", callModel)
   .addNode("store_memory", storeMemory)

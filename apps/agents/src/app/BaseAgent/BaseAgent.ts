@@ -1,7 +1,10 @@
 // agents/BaseAgent.ts
 import { MessagesAnnotation } from "@langchain/langgraph";
 import { RunnableConfig } from "@langchain/core/runnables";
-import { SharedMemoryManager, MemoryNamespace } from "../Memory/SharedMemoryManager.js";
+import {
+  SharedMemoryManager,
+  MemoryNamespace,
+} from "../Memory/SharedMemoryManager.js";
 import { getTestServerTools } from "../mcp-servers/mcp-client.js";
 
 export interface AgentConfig {
@@ -27,7 +30,10 @@ export abstract class BaseAgent {
   protected abstract initializellm(): any;
   protected abstract buildGraph(): any;
 
-  async analyzeToolsNode(_state: typeof MessagesAnnotation.State, _config: RunnableConfig){
+  async analyzeToolsNode(
+    _state: typeof MessagesAnnotation.State,
+    _config: RunnableConfig
+  ) {
     await getTestServerTools();
   }
 
@@ -55,12 +61,14 @@ export abstract class BaseAgent {
   }
 
   // 获取所有相关记忆
-  protected async getAllSharedMemories(prefix?: string): Promise<Record<string, any>> {
+  protected async getAllSharedMemories(
+    prefix?: string
+  ): Promise<Record<string, any>> {
     const memories = await this.memoryManager.listSharedMemories(
       this.config.namespace,
       { prefix }
     );
-    
+
     const result: Record<string, any> = {};
     for (const memory of memories) {
       result[memory.key] = memory.value;
@@ -71,8 +79,7 @@ export abstract class BaseAgent {
   // 编译图并返回可执行的Agent
   compile() {
     return this.graph.compile({
-      checkpointer: this.memoryManager.getCheckpointer()
+      checkpointer: this.memoryManager.getCheckpointer(),
     });
   }
-
 }

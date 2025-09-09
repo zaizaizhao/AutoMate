@@ -1,7 +1,11 @@
 // memory/PostgreSQLStore.ts
-import { Pool } from 'pg';
-import { BaseStore } from '@langchain/langgraph';
-import type { Operation, OperationResults, SearchItem } from '@langchain/langgraph-checkpoint';
+import { Pool } from "pg";
+import { BaseStore } from "@langchain/langgraph";
+import type {
+  Operation,
+  OperationResults,
+  SearchItem,
+} from "@langchain/langgraph-checkpoint";
 
 export class PostgreSQLStore extends BaseStore {
   private pool: Pool;
@@ -20,13 +24,13 @@ export class PostgreSQLStore extends BaseStore {
            AND (expires_at IS NULL OR expires_at > NOW())`,
         [namespace, key]
       );
-      
+
       if (result.rows.length === 0) {
         return undefined;
       }
-      
+
       const v = result.rows[0].value;
-      return typeof v === 'string' ? JSON.parse(v) : v;
+      return typeof v === "string" ? JSON.parse(v) : v;
     } finally {
       client.release();
     }
@@ -69,10 +73,10 @@ export class PostgreSQLStore extends BaseStore {
          ORDER BY updated_at DESC`,
         [namespace]
       );
-      
+
       for (const row of result.rows) {
         const v = row.value;
-        yield [row.key, (typeof v === 'string' ? JSON.parse(v) : v)];
+        yield [row.key, typeof v === "string" ? JSON.parse(v) : v];
       }
     } finally {
       client.release();
@@ -80,17 +84,19 @@ export class PostgreSQLStore extends BaseStore {
   }
 
   // 实现 batch 方法
-  async batch<Op extends Operation[]>(operations: Op): Promise<OperationResults<Op>> {
+  async batch<Op extends Operation[]>(
+    operations: Op
+  ): Promise<OperationResults<Op>> {
     const client = await this.pool.connect();
     const results: any[] = [];
-    
+
     try {
-      await client.query('BEGIN');
-      
+      await client.query("BEGIN");
+
       for (const operation of operations) {
-        if ('key' in operation && 'namespace' in operation) {
+        if ("key" in operation && "namespace" in operation) {
           // GetOperation
-          if ('value' in operation) {
+          if ("value" in operation) {
             // PutOperation
             if (operation.value === null) {
               // Delete operation
@@ -106,7 +112,11 @@ export class PostgreSQLStore extends BaseStore {
                  VALUES ($1, $2, $3, NOW())
                  ON CONFLICT (namespace_path, key)
                  DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-                [operation.namespace, operation.key, JSON.stringify(operation.value)]
+                [
+                  operation.namespace,
+                  operation.key,
+                  JSON.stringify(operation.value),
+                ]
               );
               results.push(undefined);
             }
@@ -118,36 +128,38 @@ export class PostgreSQLStore extends BaseStore {
                  AND (expires_at IS NULL OR expires_at > NOW())`,
               [operation.namespace, operation.key]
             );
-            const val = getResult.rows.length > 0 ? getResult.rows[0].value : null;
-            results.push(val ? (typeof val === 'string' ? JSON.parse(val) : val) : null);
+            const val =
+              getResult.rows.length > 0 ? getResult.rows[0].value : null;
+            results.push(
+              val ? (typeof val === "string" ? JSON.parse(val) : val) : null
+            );
           }
-        } else if ('namespacePrefix' in operation) {
+        } else if ("namespacePrefix" in operation) {
           // SearchOperation
-          const searchResults = await this.search(
-            operation.namespacePrefix,
-            {
-              limit: operation.limit,
-              offset: operation.offset
-            }
-          );
+          const searchResults = await this.search(operation.namespacePrefix, {
+            limit: operation.limit,
+            offset: operation.offset,
+          });
           results.push(searchResults);
-        } else if ('matchConditions' in operation) {
+        } else if ("matchConditions" in operation) {
           // ListNamespacesOperation
           const namespaces = await this.listNamespaces({
             limit: operation.limit,
             offset: operation.offset,
-            maxDepth: operation.maxDepth
+            maxDepth: operation.maxDepth,
           });
           results.push(namespaces);
         } else {
-          throw new Error(`Unsupported operation type: ${JSON.stringify(operation)}`);
+          throw new Error(
+            `Unsupported operation type: ${JSON.stringify(operation)}`
+          );
         }
       }
-      
-      await client.query('COMMIT');
+
+      await client.query("COMMIT");
       return results as OperationResults<Op>;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
@@ -163,8 +175,8 @@ export class PostgreSQLStore extends BaseStore {
       tags?: Record<string, any>;
       limit?: number;
       offset?: number;
-      orderBy?: 'updated_at' | 'key';
-      orderDirection?: 'ASC' | 'DESC';
+      orderBy?: "updated_at" | "key";
+      orderDirection?: "ASC" | "DESC";
     }
   ): Promise<SearchItem[]> {
     let query = `
@@ -173,54 +185,55 @@ export class PostgreSQLStore extends BaseStore {
       WHERE namespace_path = $1
         AND (expires_at IS NULL OR expires_at > NOW())
     `;
-    
+
     const params: any[] = [namespace];
     let paramIndex = 2;
-    
+
     if (options?.keyPattern) {
       query += ` AND key LIKE $${paramIndex}`;
       params.push(options.keyPattern);
       paramIndex++;
     }
-    
+
     if (options?.dataType) {
       query += ` AND data_type = $${paramIndex}`;
       params.push(options.dataType);
       paramIndex++;
     }
-    
+
     if (options?.tags) {
       query += ` AND tags @> $${paramIndex}`;
       params.push(JSON.stringify(options.tags));
       paramIndex++;
     }
-    
-    const orderBy = options?.orderBy || 'updated_at';
-    const orderDirection = options?.orderDirection || 'DESC';
+
+    const orderBy = options?.orderBy || "updated_at";
+    const orderDirection = options?.orderDirection || "DESC";
     query += ` ORDER BY ${orderBy} ${orderDirection}`;
-    
+
     if (options?.limit) {
       query += ` LIMIT $${paramIndex}`;
       params.push(options.limit);
       paramIndex++;
     }
-    
+
     if (options?.offset) {
       query += ` OFFSET $${paramIndex}`;
       params.push(options.offset);
     }
-    
+
     const client = await this.pool.connect();
     try {
       const result = await client.query(query, params);
-      
-      return result.rows.map(row => ({
+
+      return result.rows.map((row) => ({
         namespace,
         key: row.key,
-        value: typeof row.value === 'string' ? JSON.parse(row.value) : row.value,
+        value:
+          typeof row.value === "string" ? JSON.parse(row.value) : row.value,
         createdAt: row.created_at ? new Date(row.created_at) : new Date(),
         updatedAt: row.updated_at ? new Date(row.updated_at) : new Date(),
-        score: 1.0 // 默认评分
+        score: 1.0, // 默认评分
       }));
     } finally {
       client.release();
@@ -230,12 +243,17 @@ export class PostgreSQLStore extends BaseStore {
   // 批量操作方法
   async putMany(
     namespace: string[],
-    items: Array<{ key: string; value: any; dataType?: string; tags?: Record<string, any> }>
+    items: Array<{
+      key: string;
+      value: any;
+      dataType?: string;
+      tags?: Record<string, any>;
+    }>
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
-      await client.query('BEGIN');
-      
+      await client.query("BEGIN");
+
       for (const item of items) {
         await client.query(
           `INSERT INTO memory_store (namespace_path, key, value, data_type, tags, updated_at)
@@ -251,14 +269,14 @@ export class PostgreSQLStore extends BaseStore {
             item.key,
             JSON.stringify(item.value),
             item.dataType,
-            JSON.stringify(item.tags || {})
+            JSON.stringify(item.tags || {}),
           ]
         );
       }
-      
-      await client.query('COMMIT');
+
+      await client.query("COMMIT");
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();

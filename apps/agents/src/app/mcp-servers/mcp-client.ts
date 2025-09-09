@@ -1,4 +1,3 @@
-
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 // MCP服务器配置定义
@@ -20,7 +19,7 @@ export const MCP_SERVER_CONFIGS: Record<string, MCPServerConfig> = {
     command: "tsx",
     args: ["./src/mcp-servers/json-writer-server.ts"],
     transport: "stdio",
-  }
+  },
 };
 
 /**
@@ -30,7 +29,9 @@ export class MCPClientManager {
   private clients: Map<string, MultiServerMCPClient> = new Map();
   private serverConfigs: Record<string, MCPServerConfig>;
 
-  constructor(serverConfigs: Record<string, MCPServerConfig> = MCP_SERVER_CONFIGS) {
+  constructor(
+    serverConfigs: Record<string, MCPServerConfig> = MCP_SERVER_CONFIGS
+  ) {
     this.serverConfigs = serverConfigs;
   }
 
@@ -39,10 +40,10 @@ export class MCPClientManager {
    */
   private getClient(serverNames: string[]): MultiServerMCPClient {
     const clientKey = serverNames.sort().join(",");
-    
+
     if (!this.clients.has(clientKey)) {
       const mcpServers: Record<string, MCPServerConfig> = {};
-      
+
       for (const serverName of serverNames) {
         if (this.serverConfigs[serverName]) {
           mcpServers[serverName] = this.serverConfigs[serverName];
@@ -50,11 +51,11 @@ export class MCPClientManager {
           throw new Error(`MCP服务器配置未找到: ${serverName}`);
         }
       }
-      
+
       const client = new MultiServerMCPClient({ mcpServers } as any);
       this.clients.set(clientKey, client);
     }
-    
+
     return this.clients.get(clientKey)!;
   }
 
@@ -79,7 +80,7 @@ export class MCPClientManager {
   async closeAll(): Promise<void> {
     for (const client of this.clients.values()) {
       // 如果客户端有close方法，调用它
-      if (typeof (client as any).close === 'function') {
+      if (typeof (client as any).close === "function") {
         await (client as any).close();
       }
     }

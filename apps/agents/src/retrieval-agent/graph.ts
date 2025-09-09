@@ -16,7 +16,7 @@ const SearchQuery = z.object({
 
 async function generateQuery(
   state: typeof StateAnnotation.State,
-  config?: RunnableConfig,
+  config?: RunnableConfig
 ): Promise<typeof StateAnnotation.Update> {
   const messages = state.messages;
   if (messages.length === 1) {
@@ -47,7 +47,7 @@ async function generateQuery(
 
 async function retrieve(
   state: typeof StateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof StateAnnotation.Update> {
   const query = state.queries[state.queries.length - 1];
   const retriever = await makeRetriever(config);
@@ -57,7 +57,7 @@ async function retrieve(
 
 async function respond(
   state: typeof StateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof StateAnnotation.Update> {
   /**
    * Call the LLM powering our "agent".
@@ -87,7 +87,7 @@ const builder = new StateGraph(
     // The only input field is the user
     input: InputStateAnnotation,
   },
-  ConfigurationAnnotation,
+  ConfigurationAnnotation
 )
   .addNode("generateQuery", generateQuery)
   .addNode("retrieve", retrieve)

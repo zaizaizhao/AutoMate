@@ -1,1 +1,1 @@
-![Graph](docs/imgs/graph.png)
+![Graph](docs/imgs/structure.png)

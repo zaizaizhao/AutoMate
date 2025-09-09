@@ -23,7 +23,7 @@ describe("Memory Graph", () => {
     conversations.map((conversation, index) => [
       ["short", "medium", "long"][index],
       conversation,
-    ]),
+    ])
   )(
     "should store memories for %s conversation",
     async (_, conversation) => {
@@ -47,7 +47,7 @@ describe("Memory Graph", () => {
               model: "gpt-4o-mini",
               systemPrompt: "You are a helpful assistant.",
             },
-          },
+          }
         );
       }
 
@@ -59,6 +59,6 @@ describe("Memory Graph", () => {
       const badMemories = await memStore.search(badNamespace);
       expect(badMemories.length).toBe(0);
     },
-    30000,
+    30000
   );
 });

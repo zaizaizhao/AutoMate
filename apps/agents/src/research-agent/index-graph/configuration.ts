@@ -27,7 +27,7 @@ export const IndexConfigurationAnnotation = Annotation.Root({
  * @returns An instance of typeof IndexConfigurationAnnotation.State with the specified configuration.
  */
 export function ensureIndexConfiguration(
-  config: RunnableConfig,
+  config: RunnableConfig
 ): typeof IndexConfigurationAnnotation.State {
   const configurable = (config?.configurable || {}) as Partial<
     typeof IndexConfigurationAnnotation.State

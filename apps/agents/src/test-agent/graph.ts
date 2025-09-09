@@ -10,12 +10,11 @@ import { loadChatModel } from "./utils.js";
 // Define the function that calls the model
 async function callModel(
   state: typeof MessagesAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof MessagesAnnotation.Update> {
   const configuration = ensureConfiguration(config);
   const tools = await getTools();
   console.log("Available tools:", tools);
-  
 
   const model = (await loadChatModel(configuration.model)).bindTools(tools);
   const response = await model.invoke([
@@ -23,7 +22,7 @@ async function callModel(
       role: "system",
       content: configuration.systemPromptTemplate.replace(
         "{system_time}",
-        new Date().toISOString(),
+        new Date().toISOString()
       ),
     },
     ...state.messages,
@@ -45,10 +44,8 @@ function routeModelOutput(state: typeof MessagesAnnotation.State): string {
   }
 }
 
-
-
 // 导出子图，用于构建graph
-export async function generateGraph(){
+export async function generateGraph() {
   const tools = await getTools();
   // Define a new graph. We use the prebuilt MessagesAnnotation to define state:
   // https://langchain-ai.github.io/langgraphjs/concepts/low_level/#messagesannotation
@@ -66,18 +63,18 @@ export async function generateGraph(){
       "callModel",
       // Next, we pass in the function that will determine the sink node(s), which
       // will be called after the source node is called.
-      routeModelOutput,
+      routeModelOutput
     )
-    .addEdge("tools","callModel")
-    .addEdge("callModel","__end__");
-    return workflow;
+    .addEdge("tools", "callModel")
+    .addEdge("callModel", "__end__");
+  return workflow;
 }
 
 // Initialize graph at module load time
 const graphPromise = (await generateGraph()).compile({
-    interruptBefore: [], // if you want to update the state before calling the tools
-    interruptAfter: [],
-  })  ;
+  interruptBefore: [], // if you want to update the state before calling the tools
+  interruptAfter: [],
+});
 
 // Export graph that's initialized at startup
 export const graph = await graphPromise;

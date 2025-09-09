@@ -23,7 +23,7 @@ import { formatDocs, loadChatModel } from "../shared/utils.js";
 
 async function analyzeAndRouteQuery(
   state: typeof AgentStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof AgentStateAnnotation.Update> {
   const configuration = ensureAgentConfiguration(config);
   const model = await loadChatModel(configuration.queryModel);
@@ -37,12 +37,14 @@ async function analyzeAndRouteQuery(
       type: z.enum(["more-info", "langchain", "general"]),
     })
     .describe("Classify user query.");
-  const response = await model.withStructuredOutput(RouterSchema).invoke(messages);
+  const response = await model
+    .withStructuredOutput(RouterSchema)
+    .invoke(messages);
   return { router: response as Router };
 }
 
 function routeQuery(
-  state: typeof AgentStateAnnotation.State,
+  state: typeof AgentStateAnnotation.State
 ): "createResearchPlan" | "askForMoreInfo" | "respondToGeneralQuery" {
   const type = state.router.type;
   if (type === "langchain") {
@@ -58,13 +60,13 @@ function routeQuery(
 
 async function askForMoreInfo(
   state: typeof AgentStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof AgentStateAnnotation.Update> {
   const configuration = ensureAgentConfiguration(config);
   const model = await loadChatModel(configuration.queryModel);
   const systemPrompt = configuration.moreInfoSystemPrompt.replace(
     "{logic}",
-    state.router.logic,
+    state.router.logic
   );
   const messages = [
     { role: "system", content: systemPrompt },
@@ -76,13 +78,13 @@ async function askForMoreInfo(
 
 async function respondToGeneralQuery(
   state: typeof AgentStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof AgentStateAnnotation.Update> {
   const configuration = ensureAgentConfiguration(config);
   const model = await loadChatModel(configuration.queryModel);
   const systemPrompt = configuration.generalSystemPrompt.replace(
     "{logic}",
-    state.router.logic,
+    state.router.logic
   );
   const messages = [
     { role: "system", content: systemPrompt },
@@ -94,7 +96,7 @@ async function respondToGeneralQuery(
 
 async function createResearchPlan(
   state: typeof AgentStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof AgentStateAnnotation.Update> {
   const Plan = z
     .object({
@@ -116,31 +118,31 @@ async function createResearchPlan(
 
 async function conductResearch(
   state: typeof AgentStateAnnotation.State,
-  config: LangGraphRunnableConfig,
+  config: LangGraphRunnableConfig
 ): Promise<typeof AgentStateAnnotation.Update> {
   const result = await researcherGraph.invoke(
     { question: state.steps[0] },
-    { ...config },
+    { ...config }
   );
   return { documents: result.documents, steps: state.steps.slice(1) };
 }
 
 function checkFinished(
-  state: typeof AgentStateAnnotation.State,
+  state: typeof AgentStateAnnotation.State
 ): "conductResearch" | "respond" {
   return state.steps && state.steps.length > 0 ? "conductResearch" : "respond";
 }
 
 async function respond(
   state: typeof AgentStateAnnotation.State,
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Promise<typeof AgentStateAnnotation.Update> {
   const configuration = ensureAgentConfiguration(config);
   const model = await loadChatModel(configuration.responseModel);
   const context = formatDocs(state.documents);
   const prompt = configuration.responseSystemPrompt.replace(
     "{context}",
-    context,
+    context
   );
   const messages = [{ role: "system", content: prompt }, ...state.messages];
   const response = await model.invoke(messages);
@@ -153,7 +155,7 @@ const builder = new StateGraph(
     stateSchema: AgentStateAnnotation,
     input: InputStateAnnotation,
   },
-  AgentConfigurationAnnotation,
+  AgentConfigurationAnnotation
 )
   .addNode("analyzeAndRouteQuery", analyzeAndRouteQuery)
   .addNode("askForMoreInfo", askForMoreInfo)

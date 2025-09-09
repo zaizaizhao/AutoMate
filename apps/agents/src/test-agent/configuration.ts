@@ -18,15 +18,14 @@ export const ConfigurationSchema = Annotation.Root({
 });
 
 export function ensureConfiguration(
-  config: RunnableConfig,
+  config: RunnableConfig
 ): typeof ConfigurationSchema.State {
   /**
    * Ensure the defaults are populated.
    */
 
-  
   const configurable = config.configurable ?? {};
-    console.log(configurable);
+  console.log(configurable);
   return {
     systemPromptTemplate:
       configurable.systemPromptTemplate ?? SYSTEM_PROMPT_TEMPLATE,

@@ -15,7 +15,7 @@ import {
 
 function ensureDocsHaveUserId(
   docs: Document[],
-  config: RunnableConfig,
+  config: RunnableConfig
 ): Document[] {
   const configuration = ensureIndexConfiguration(config);
   const userId = configuration.userId;
@@ -29,7 +29,7 @@ function ensureDocsHaveUserId(
 
 async function indexDocs(
   state: typeof IndexStateAnnotation.State,
-  config?: RunnableConfig,
+  config?: RunnableConfig
 ): Promise<typeof IndexStateAnnotation.Update> {
   if (!config) {
     throw new Error("ConfigurationAnnotation required to run index_docs.");
@@ -46,7 +46,7 @@ async function indexDocs(
 
 const builder = new StateGraph(
   IndexStateAnnotation,
-  IndexConfigurationAnnotation,
+  IndexConfigurationAnnotation
 )
   .addNode("indexDocs", indexDocs)
   .addEdge("__start__", "indexDocs");

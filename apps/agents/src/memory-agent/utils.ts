@@ -3,7 +3,7 @@ import { BaseStore, LangGraphRunnableConfig } from "@langchain/langgraph";
  * Get the store from the configuration or throw an error.
  */
 export function getStoreFromConfigOrThrow(
-  config: LangGraphRunnableConfig,
+  config: LangGraphRunnableConfig
 ): BaseStore {
   if (!config.store) {
     throw new Error("Store not found in configuration");

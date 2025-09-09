@@ -31,12 +31,15 @@ export type BuildToolInvocationUserPromptOptions = {
   schema?: any;
 };
 
-export function buildToolInvocationUserPrompt(opts: BuildToolInvocationUserPromptOptions): string {
+export function buildToolInvocationUserPrompt(
+  opts: BuildToolInvocationUserPromptOptions
+): string {
   const { taskId, toolName, description, suggestedParams, schema } = opts;
 
   const prettyParams = safePretty(suggestedParams);
-  const schemaText = schema ? `Tool input schema (JSON Schema): ${safePretty(schema)}` :
-    "Schema unknown: infer conservatively from provided parameters and description; obey common-sense types.";
+  const schemaText = schema
+    ? `Tool input schema (JSON Schema): ${safePretty(schema)}`
+    : "Schema unknown: infer conservatively from provided parameters and description; obey common-sense types.";
 
   return [
     `Execute a single test task using the specified tool.`,
@@ -55,7 +58,9 @@ export function buildToolInvocationUserPrompt(opts: BuildToolInvocationUserPromp
     "7) Use deterministic placeholders for IDs (e.g., 'test-user-001', 'order-1001').",
     "8) Keep inputs safe and idempotent; do not request destructive actions.",
     "Output requirement: Respond ONLY with a single tool call for the tool above, with finalized arguments. No prose.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function safePretty(value: any): string {
