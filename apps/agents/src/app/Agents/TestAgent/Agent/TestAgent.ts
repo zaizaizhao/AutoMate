@@ -6,16 +6,16 @@ import { getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import { loadChatModel } from "src/app/ModelUtils/ChatModel.js";
 import { buildSystemPrompt, buildToolInvocationUserPrompt } from "src/app/Agents/TestAgent/Prompts/Prompts.js";
 
-interface TaskPlanedForTest {
-    id: string;
-    plan_id: string;
-    task_name: string;
-    tool_name: string;
-    tool_args: Record<string, any>;
-    status: 'pending' | 'running' | 'completed' | 'failed';
-    created_at: Date;
-    updated_at: Date;
-}
+// interface TaskPlanedForTest {
+//     id: string;
+//     plan_id: string;
+//     task_name: string;
+//     tool_name: string;
+//     tool_args: Record<string, any>;
+//     status: 'pending' | 'running' | 'completed' | 'failed';
+//     created_at: Date;
+//     updated_at: Date;
+// }
 
 interface ToolCallResult {
     taskId: string;
@@ -27,7 +27,7 @@ interface ToolCallResult {
 
 export class ExecuteTestAgent extends BaseAgent {
     private llm: any;
-    private lastThreadId: string | null = null;
+    // private lastThreadId: string | null = null;
 
     protected async initializellm() {
         this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
@@ -67,13 +67,59 @@ export class ExecuteTestAgent extends BaseAgent {
         const existingBatchStateRaw = usingRuntimeStore
             ? await runtimeStore.get(nsPlans, "toolBatch")
             : await this.getSharedMemory(batchMemKey);
-        const existingBatchState = (existingBatchStateRaw && typeof existingBatchStateRaw === "object" && "value" in (existingBatchStateRaw as any))
+        let existingBatchState = (existingBatchStateRaw && typeof existingBatchStateRaw === "object" && "value" in (existingBatchStateRaw as any))
             ? (existingBatchStateRaw as any).value
             : existingBatchStateRaw;
         console.log(`[ExecuteTestNode] Read batchState via ${usingRuntimeStore ? 'runtimeStore' : 'sharedMemory'} (normalized):`, existingBatchState);
 
-        const batchIndex: number = existingBatchState?.batchIndex ?? 0; // 默认从0开始
-        const totalBatches: number = existingBatchState?.totalBatches ?? 1;
+        // 在第一次执行该线程时，将 PlanAgent 的批次记录重置为 0，避免一开始就处于完成状态
+        // 判定“第一次执行”：内存中尚无 executeProgress 记录
+        const nsExecReset = [
+            "plans",
+            this.config.namespace.project,
+            this.config.namespace.environment,
+            this.config.namespace.agent_type,
+            threadId,
+        ];
+        let execProgressProbeRaw = usingRuntimeStore ? await runtimeStore.get(nsExecReset, "executeProgress") : undefined;
+        let execProgressProbe = (execProgressProbeRaw && typeof execProgressProbeRaw === "object" && "value" in (execProgressProbeRaw as any))
+            ? (execProgressProbeRaw as any).value
+            : execProgressProbeRaw;
+        const isFirstExecution = !execProgressProbe;
+        if (existingBatchState && isFirstExecution) {
+            try {
+                const toolsPerBatch = existingBatchState?.toolsPerBatch ?? 5;
+                const totalTools = existingBatchState?.totalTools ?? 0;
+                const totalBatches = existingBatchState?.totalBatches ?? (Math.ceil(totalTools / toolsPerBatch) || 1);
+                const resetState = {
+                    batchIndex: 0,
+                    toolsPerBatch,
+                    totalTools,
+                    totalBatches,
+                };
+                if (usingRuntimeStore && typeof runtimeStore.put === "function") {
+                    await runtimeStore.put(nsPlans, "toolBatch", resetState);
+                }
+                if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== runtimeStore) {
+                    await primaryStore.put(nsPlans, "toolBatch", resetState);
+                }
+                // 初始化执行进度为第0批第0个任务
+                const initProgress = { batchIndex: 0, taskIndex: 0 };
+                if (usingRuntimeStore && typeof runtimeStore.put === "function") {
+                    await runtimeStore.put(nsExecReset, "executeProgress", initProgress);
+                }
+                if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== runtimeStore) {
+                    await primaryStore.put(nsExecReset, "executeProgress", initProgress);
+                }
+                existingBatchState = resetState;
+                console.log("[ExecuteTestNode] Detected first execution for this thread. Reset toolBatch to batchIndex=0 and initialized executeProgress.");
+            } catch (e) {
+                console.warn("[ExecuteTestNode] Failed to reset batchState on first execution:", e);
+            }
+        }
+
+        let batchIndex: number = existingBatchState?.batchIndex ?? 0; // 默认从0开始
+        let totalBatches: number = existingBatchState?.totalBatches ?? 1;
 
         // 提前终止保护：如果已经在最后一批之后，直接结束，不再尝试执行任务
         if ((batchIndex ?? 0) >= (totalBatches ?? 0)) {
@@ -94,9 +140,9 @@ export class ExecuteTestAgent extends BaseAgent {
             threadId,
         ];
         let execProgressRaw = usingRuntimeStore ? await runtimeStore.get(nsExec, "executeProgress") : undefined;
-        let execProgress = (execProgressRaw && typeof execProgressRaw === "object" && "value" in (execProgressRaw as any))
+        let execProgress = (execProgressRaw && typeof execProgressRaw === "object" && ("value" in (execProgressRaw as any)))
             ? (execProgressRaw as any).value
-            : execProgressRaw;
+            : execProgressRaw ?? undefined;
         if (!execProgress || execProgress.batchIndex !== batchIndex) {
             execProgress = { batchIndex, taskIndex: 0 };
             // 双写到运行时和主存储，保证可见性
@@ -245,70 +291,157 @@ export class ExecuteTestAgent extends BaseAgent {
                 console.warn(`[ExecuteTestNode] Failed to mark task ${(task as any).taskId} as running:`, e);
             }
         }
- 
-         // 预先推进指针（工具执行完成后我们会持久化该次结果）
-         const nextProgress = { ...execProgress, taskIndex: execProgress.taskIndex + 1 };
-         if (usingRuntimeStore && typeof runtimeStore.put === "function") {
-             await runtimeStore.put(nsExec, "executeProgress", nextProgress);
-         }
-         if (primaryStore && typeof primaryStore.put === "function" && primaryStore !== runtimeStore) {
-             await primaryStore.put(nsExec, "executeProgress", nextProgress);
-         }
- 
-         // 构造对 LLM 的指令，让其调用指定工具并生成/补全参数（需满足工具 schema）
+
+        // 注意：不在此处预推进任务指针，避免一次工具执行推进两次。
+        // 指针在下一轮（持久化工具结果后）再前移。
+
+        // 构造对 LLM 的指令，让其调用指定工具并生成/补全参数（需满足工具 schema）
         const userMsg = buildToolInvocationUserPrompt({
             taskId: (task as any)?.taskId,
             toolName,
-            description: (task as any)?.description,
+            schema,
             suggestedParams,
-            schema
         });
 
         const response = await toolCallingModel.invoke([
             { role: "system", content: buildSystemPrompt() },
             { role: "user", content: userMsg }
         ]);
+        console.log("llmresponse",response);
+        
 
         return { messages: [response] };
     }
 
-    async toolsNode(_tools: any) {
-        const tool = await getTestServerTools();
-        return new ToolNode(tool)
+    async toolsNode(state: typeof MessagesAnnotation.State, config: LangGraphRunnableConfig) {
+        const tools = await getTestServerTools();
+        
+        // 处理DeepSeek-V3模型产生的格式问题
+        const messages = [...state.messages] as any[];
+        const lastMessage = messages[messages.length - 1] as AIMessage | any;
+        
+        // 检查是否有invalid_tool_calls需要清理
+        if (lastMessage?.invalid_tool_calls && Array.isArray(lastMessage.invalid_tool_calls) && lastMessage.invalid_tool_calls.length > 0) {
+            console.log("[toolsNode] Found invalid_tool_calls, attempting to clean:", lastMessage.invalid_tool_calls);
+            
+            const cleanedToolCalls: any[] = [];
+            
+            for (const invalidCall of lastMessage.invalid_tool_calls) {
+                try {
+                    // 清理参数中的markdown格式
+                    let cleanedArgs = invalidCall.args;
+                    if (typeof cleanedArgs === 'string') {
+                        // 移除markdown代码块格式
+                        cleanedArgs = cleanedArgs
+                            .replace(/^```[\w]*\n?/gm, '') // 移除开始的```
+                            .replace(/\n?```$/gm, '')      // 移除结尾的```
+                            .replace(/^`+|`+$/g, '')      // 移除单独的反引号
+                            .trim();                       // 移除首尾空白
+                        
+                        // 尝试解析为JSON
+                        try {
+                            cleanedArgs = JSON.parse(cleanedArgs);
+                        } catch (parseError) {
+                            console.warn("[toolsNode] Failed to parse cleaned args as JSON:", cleanedArgs, parseError);
+                            continue;
+                        }
+                    }
+                    
+                    // 构造清理后的工具调用
+                    const cleanedCall = {
+                        id: invalidCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        name: invalidCall.name,
+                        args: cleanedArgs
+                    };
+                    
+                    cleanedToolCalls.push(cleanedCall);
+                    console.log("[toolsNode] Successfully cleaned tool call:", cleanedCall);
+                } catch (error) {
+                    console.warn("[toolsNode] Failed to clean invalid tool call:", invalidCall, error);
+                }
+            }
+            
+            // 如果成功清理了工具调用，更新消息
+            if (cleanedToolCalls.length > 0) {
+                // 确保消息是正确的AIMessage格式
+                const updatedMessage = new AIMessage({
+                    content: lastMessage.content || "",
+                    tool_calls: cleanedToolCalls,
+                    additional_kwargs: {
+                        ...lastMessage.additional_kwargs,
+                        invalid_tool_calls: [] // 清空invalid_tool_calls
+                    }
+                });
+                messages[messages.length - 1] = updatedMessage;
+                console.log("[toolsNode] Updated message with cleaned tool calls:", cleanedToolCalls.length);
+            }
+        }
+        
+        // 确保所有消息都是正确的LangChain消息格式
+        const validMessages = messages.map((msg: any) => {
+            if (msg instanceof AIMessage) {
+                return msg;
+            }
+            // 如果不是AIMessage实例，尝试转换
+            if (msg && typeof msg === 'object') {
+                return new AIMessage({
+                    content: msg.content || "",
+                    tool_calls: msg.tool_calls || [],
+                    additional_kwargs: msg.additional_kwargs || {}
+                });
+            }
+            return msg;
+        });
+        
+        const node = new ToolNode(tools as any);
+        return node.invoke({ ...state, messages: validMessages } as any, config as any);
     }
 
-    routeModelOutput(state: typeof MessagesAnnotation.State): string {
-        const messages = state.messages;
-        const lastMessage = messages[messages.length - 1];
-        // If the LLM is invoking tools, route there.
-        if ((((lastMessage as AIMessage)?.tool_calls?.length) || 0) > 0) {
+    routeModelOutput(state: typeof MessagesAnnotation.State): "execute-tool-node" | typeof END {
+        const messages = state.messages as any[];
+        const lastMessage = messages[messages.length - 1] as AIMessage | any;
+        
+        // 检查正常的工具调用
+        const toolCalls = (lastMessage as any)?.tool_calls;
+        if (Array.isArray(toolCalls) && toolCalls.length > 0) {
             return "execute-tool-node";
         }
-        // Otherwise end the graph.
-        else {
-            return "__end__";
+        
+        // 检查格式错误的工具调用（DeepSeek-V3可能产生）
+        const invalidToolCalls = (lastMessage as any)?.invalid_tool_calls;
+        if (Array.isArray(invalidToolCalls) && invalidToolCalls.length > 0) {
+            console.log("[routeModelOutput] Found invalid_tool_calls, routing to tool execution for cleanup:", invalidToolCalls.length);
+            return "execute-tool-node";
         }
+        
+        // 检查工具调用片段
+        const toolCallChunks = (lastMessage as any)?.tool_call_chunks;
+        if (Array.isArray(toolCallChunks) && toolCallChunks.length > 0) {
+            console.log("[routeModelOutput] Found tool_call_chunks, routing to tool execution:", toolCallChunks.length);
+            return "execute-tool-node";
+        }
+        
+        // 没有任何工具调用意图，视为本轮可结束
+        return END;
     }
 
     public buildGraph() {
-        const builder = new StateGraph(MessagesAnnotation)
-            .addNode("excute-test-node", this.ExecuteTestNode.bind(this))
+        return new StateGraph(MessagesAnnotation)
+            .addNode("execute-test-node", this.ExecuteTestNode.bind(this))
             .addNode("execute-tool-node", this.toolsNode.bind(this))
-            .addEdge(START, "excute-test-node")
+            .addEdge(START, "execute-test-node")
             .addConditionalEdges(
-                "excute-test-node",
-                // Next, we pass in the function that will determine the sink node(s), which
-                // will be called after the source node is called.
-                this.routeModelOutput,
+                "execute-test-node",
+                this.routeModelOutput.bind(this),
+                ["execute-tool-node", END]
             )
-            .addEdge("execute-tool-node","excute-test-node")
- 
-        return builder.compile({
-            checkpointer: this.memoryManager.getCheckpointer(),
-            store: this.memoryManager.getStore(),
-            interruptBefore: [],
-            interruptAfter: []
-        });
+            .addEdge("execute-tool-node", "execute-test-node")
+            .compile({
+                checkpointer: this.memoryManager.getCheckpointer(),
+                store: this.memoryManager.getStore(),
+                interruptBefore: [],
+                interruptAfter: []
+            });
     }
 
 }

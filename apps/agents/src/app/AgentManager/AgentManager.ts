@@ -26,7 +26,7 @@ export class MultiAgentCoordinator {
         this.namespace = namespace;
     }
 
-    public initializeAgents(): any {
+    public initializeAgents(){
         // 初始化研究Agent
         const planAgent = new PlanAgent({
             agentId: 'plan-agent-001',
@@ -44,16 +44,22 @@ export class MultiAgentCoordinator {
 
         const planAgentNode = planAgent.buildGraph();
         const executeTestAgentNode = executeAgent.buildGraph();
-
+        // await executeTestAgentNode.invoke({
+        //     messages: [new HumanMessage("测试")]
+        // }, {
+        //     configurable: {
+        //         thread_id: "default"
+        //     }
+        // })
         const multiAgentGraph = new StateGraph(MessagesAnnotation)
             .addNode("plan-agent", planAgentNode)
             .addNode("execute-test-node",executeTestAgentNode)
             .addEdge(START, "plan-agent")
             .addEdge("plan-agent","execute-test-node")
-            .addEdge("execute-test-node","plan-agent")
+            // .addEdge("execute-test-node","plan-agent")
             .addEdge("execute-test-node", END)
 
-        this.agents.set('research', planAgentNode);
+        // this.agents.set('research', planAgentNode);
         return multiAgentGraph
     }
 

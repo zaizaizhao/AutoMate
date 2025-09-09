@@ -19,6 +19,7 @@ export function buildSystemPrompt(): string {
     "- Keep inputs safe, idempotent, and non-destructive. Never include secrets or PII.",
     "- Prefer deterministic values (e.g., fixed dates in ISO 8601, stable identifiers).",
     "- If a field has constraints (enums, min/max, regex), adhere to them precisely.",
+    "CRITICAL: Tool call arguments must be pure JSON objects. Do NOT wrap arguments in markdown code blocks (```json or ```). Do NOT use backticks around JSON. Output raw JSON only.",
   ].join("\n");
 }
 

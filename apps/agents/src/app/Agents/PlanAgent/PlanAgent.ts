@@ -2,7 +2,7 @@ import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph
 import { BaseAgent, AgentConfig } from "../../BaseAgent/BaseAgent.js";
 
 import { AIMessage } from "@langchain/core/messages";
-import { ConfigurationSchema } from "../../ModelUtils/Config.js";
+// import { ConfigurationSchema } from "../../ModelUtils/Config.js";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
 import { TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
@@ -176,7 +176,7 @@ export class PlanAgent extends BaseAgent {
       let lastUserText = "";
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i];
-        const role = m?.role || (typeof m?._getType === 'function' ? m._getType() : undefined);
+        const role = m?.role || m?.type || (m as any)?._getType?.() || 'unknown';
         if (role === "user" || role === "human") {
           const c = m?.content;
           if (typeof c === "string") {

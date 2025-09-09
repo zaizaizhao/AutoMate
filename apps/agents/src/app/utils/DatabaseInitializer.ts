@@ -1,0 +1,106 @@
+import { Pool } from 'pg';
+import { URL } from 'url';
+
+/**
+ * 数据库初始化工具类
+ * 负责在应用启动前确保目标数据库存在
+ */
+export class DatabaseInitializer {
+  /**
+   * 确保数据库存在，如果不存在则创建
+   * @param connectionString 完整的数据库连接字符串
+   */
+  static async ensureDatabaseExists(connectionString: string): Promise<void> {
+    try {
+      // 解析连接字符串
+      const url = new URL(connectionString);
+      const targetDatabase = url.pathname.slice(1); // 移除开头的 '/'
+      
+      if (!targetDatabase) {
+        throw new Error('数据库名称不能为空');
+      }
+
+      // 创建连接到默认数据库 'postgres' 的连接字符串
+      const adminUrl = new URL(connectionString);
+      adminUrl.pathname = '/postgres';
+      const adminConnectionString = adminUrl.toString();
+
+      console.log(`[DB Init] 检查数据库 '${targetDatabase}' 是否存在...`);
+
+      // 连接到 postgres 数据库检查目标数据库是否存在
+      const adminPool = new Pool({
+        connectionString: adminConnectionString,
+        max: 1, // 只需要一个连接
+        idleTimeoutMillis: 5000,
+        connectionTimeoutMillis: 10000
+      });
+
+      try {
+        const client = await adminPool.connect();
+        
+        try {
+          // 检查数据库是否存在
+          const result = await client.query(
+            'SELECT 1 FROM pg_database WHERE datname = $1',
+            [targetDatabase]
+          );
+
+          if (result.rows.length === 0) {
+            console.log(`[DB Init] 数据库 '${targetDatabase}' 不存在，正在创建...`);
+            
+            // 创建数据库（注意：数据库名不能使用参数化查询）
+            // 为了安全，验证数据库名只包含字母、数字和下划线
+            if (!/^[a-zA-Z0-9_]+$/.test(targetDatabase)) {
+              throw new Error(`数据库名称 '${targetDatabase}' 包含非法字符`);
+            }
+            
+            await client.query(`CREATE DATABASE "${targetDatabase}"`);
+            console.log(`[DB Init] 数据库 '${targetDatabase}' 创建成功`);
+          } else {
+            console.log(`[DB Init] 数据库 '${targetDatabase}' 已存在`);
+          }
+        } finally {
+          client.release();
+        }
+      } finally {
+        await adminPool.end();
+      }
+
+      // 验证目标数据库连接
+      console.log(`[DB Init] 验证数据库 '${targetDatabase}' 连接...`);
+      const targetPool = new Pool({
+        connectionString: connectionString,
+        max: 1,
+        idleTimeoutMillis: 5000,
+        connectionTimeoutMillis: 10000
+      });
+
+      try {
+        const client = await targetPool.connect();
+        await client.query('SELECT 1');
+        client.release();
+        console.log(`[DB Init] 数据库 '${targetDatabase}' 连接验证成功`);
+      } finally {
+        await targetPool.end();
+      }
+
+    } catch (error) {
+      console.error('[DB Init] 数据库初始化失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 从连接字符串中提取数据库名称
+   * @param connectionString 数据库连接字符串
+   * @returns 数据库名称
+   */
+  static extractDatabaseName(connectionString: string): string {
+    try {
+      const url = new URL(connectionString);
+      return url.pathname.slice(1); // 移除开头的 '/'
+    } catch (error) {
+      throw new Error(`无效的数据库连接字符串: ${connectionString}`);
+    }
+  }
+}
