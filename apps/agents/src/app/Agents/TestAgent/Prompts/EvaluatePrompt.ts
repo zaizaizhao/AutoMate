@@ -19,6 +19,7 @@ You are an expert system analyst responsible for evaluating the success or failu
 ### EVALUATION CRITERIA
 
 #### SUCCESS INDICATORS
+- ✅ Based on status codes is the primary and most important factor - responses from 200 to 299 are successful responses.
 - ✅ Tool executed without errors or exceptions
 - ✅ Expected output format and structure are correct
 - ✅ All required parameters were processed successfully

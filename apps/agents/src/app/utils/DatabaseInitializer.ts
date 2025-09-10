@@ -92,6 +92,59 @@ export class DatabaseInitializer {
   }
 
   /**
+   * 执行数据库迁移，确保表结构是最新的
+   * @param connectionString 完整的数据库连接字符串
+   */
+  static async migrateDatabase(connectionString: string): Promise<void> {
+    console.log("[DB Migration] 开始执行数据库迁移...");
+    
+    const pool = new Pool({
+      connectionString: connectionString,
+      max: 1,
+      idleTimeoutMillis: 5000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    try {
+      const client = await pool.connect();
+      
+      try {
+        // 检查task_test表是否存在evaluation_result字段
+        const columnCheck = await client.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_name = 'task_test' 
+            AND column_name = 'evaluation_result'
+            AND table_schema = 'public'
+        `);
+
+        if (columnCheck.rows.length === 0) {
+          console.log("[DB Migration] task_test表缺少evaluation_result字段，正在添加...");
+          
+          // 添加evaluation_result字段
+          await client.query(`
+            ALTER TABLE task_test 
+            ADD COLUMN evaluation_result JSONB
+          `);
+          
+          console.log("[DB Migration] evaluation_result字段添加成功");
+        } else {
+          console.log("[DB Migration] task_test表的evaluation_result字段已存在，跳过迁移");
+        }
+        
+        console.log("[DB Migration] 数据库迁移完成");
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error("[DB Migration] 数据库迁移失败:", error);
+      throw error;
+    } finally {
+      await pool.end();
+    }
+  }
+
+  /**
    * 从连接字符串中提取数据库名称
    * @param connectionString 数据库连接字符串
    * @returns 数据库名称

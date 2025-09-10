@@ -195,6 +195,10 @@ export class ExecuteTestAgent extends BaseAgent {
 
     // 若本批次任务已全部执行，尝试推进到下一批（若存在），并重置进度
     if ((execProgress.taskIndex ?? 0) >= tasks.length) {
+      console.log(
+        `[ExecuteTestNode] *** BATCH COMPLETION CHECK *** Current batch ${batchIndex} has ${tasks.length} tasks, taskIndex=${execProgress.taskIndex}. All tasks completed.`
+      );
+      
       const nextBatch = Math.min((batchIndex ?? 0) + 1, totalBatches);
       if (existingBatchState && nextBatch !== batchIndex) {
         const newState = { ...existingBatchState, batchIndex: nextBatch };
@@ -216,6 +220,9 @@ export class ExecuteTestAgent extends BaseAgent {
         );
 
         if (!newTasks || newTasks.length === 0) {
+          console.log(
+            `[ExecuteTestNode] *** ALL BATCHES COMPLETED *** No tasks found for batch ${nextBatch}. Execution finished.`
+          );
           return {
             messages: [
               new AIMessage({
@@ -236,6 +243,9 @@ export class ExecuteTestAgent extends BaseAgent {
         // 继续执行，不返回，让代码流继续到任务选择逻辑
       } else {
         // 没有下一批，结束
+        console.log(
+          `[ExecuteTestNode] *** ALL BATCHES COMPLETED *** Batch ${batchIndex} was the final batch. Total batches: ${totalBatches}. Execution finished.`
+        );
         return {
           messages: [
             new AIMessage({
@@ -249,6 +259,11 @@ export class ExecuteTestAgent extends BaseAgent {
     // 选择下一个任务
     const task = tasks[execProgress.taskIndex];
     const toolName = (task as any)?.toolName || (task as any)?.tool_name;
+    const isLastTaskInCurrentBatch = execProgress.taskIndex >= tasks.length - 1;
+    
+    console.log(
+      `[ExecuteTestNode] *** TASK SELECTION *** Executing task ${execProgress.taskIndex}/${tasks.length - 1} in batch ${batchIndex}. Tool: ${toolName}. IsLastTask: ${isLastTaskInCurrentBatch}`
+    );
     const toolDef: any = (tools as any[]).find(
       (t: any) => t?.name === toolName || t?.toolName === toolName
     );
@@ -619,7 +634,9 @@ export class ExecuteTestAgent extends BaseAgent {
               currentTestId,
               status,
               detailedTestResult,
-              errorMessage
+              errorMessage,
+              undefined,
+              evaluationResult
             );
             console.log(
               `[llmEvaluateNode] Updated test result: ${currentTestId} with structured LLM evaluation`
@@ -635,6 +652,7 @@ export class ExecuteTestAgent extends BaseAgent {
               testResult: detailedTestResult,
               status: status as "completed" | "failed",
               errorMessage,
+              evaluationResult: evaluationResult,
               createdAt: new Date(),
               updatedAt: new Date(),
               completedAt: new Date(),
@@ -666,6 +684,7 @@ export class ExecuteTestAgent extends BaseAgent {
                   },
                   status: data.error || data.failed ? "failed" : "completed",
                   errorMessage: data.error || data.errorMessage,
+                  evaluationResult: evaluationResult,
                   createdAt: new Date(),
                   updatedAt: new Date(),
                   completedAt: new Date(),
@@ -683,6 +702,7 @@ export class ExecuteTestAgent extends BaseAgent {
                   status:
                     result.error || result.failed ? "failed" : "completed",
                   errorMessage: result.error || result.errorMessage,
+                  evaluationResult: evaluationResult,
                   createdAt: new Date(),
                   updatedAt: new Date(),
                   completedAt: new Date(),
@@ -704,6 +724,15 @@ export class ExecuteTestAgent extends BaseAgent {
         }
       }
 
+      // 获取当前批次信息以检查是否为最后一个任务
+      const currentBatchIndex = execProgress?.batchIndex ?? 0;
+      const currentTaskIndex = execProgress?.taskIndex ?? 0;
+      const isLastTaskInBatch = currentTaskIndex >= tasks.length - 1;
+      
+      console.log(
+        `[llmEvaluateNode] Task evaluation completed for batch ${currentBatchIndex}, task ${currentTaskIndex}/${tasks.length - 1}. IsLastTask: ${isLastTaskInBatch}`
+      );
+
       // 工具结果已评估并落库，推进执行指针到下一个任务
       const progressed = {
         ...execProgress,
@@ -713,8 +742,16 @@ export class ExecuteTestAgent extends BaseAgent {
         await runtimeStore.put(nsExec, "executeProgress", progressed);
       }
       console.log(
-        `[llmEvaluateNode] Advanced executeProgress to taskIndex=${progressed.taskIndex}`
+        `[llmEvaluateNode] Advanced executeProgress to taskIndex=${progressed.taskIndex}. Data storage completed for task ${completedTask?.taskId}`
       );
+      
+      // 如果这是最后一个任务，添加额外的日志确认数据已完全存储
+      if (isLastTaskInBatch) {
+        const currentTestId = (execProgress as any)?.currentTestId;
+        console.log(
+          `[llmEvaluateNode] *** LAST TASK COMPLETED *** Batch ${currentBatchIndex} task ${currentTaskIndex} evaluation and storage finished. TestId: ${currentTestId || 'fallback'}`
+        );
+      }
 
       return {
         messages: [

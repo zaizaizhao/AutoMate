@@ -35,6 +35,7 @@ export interface TaskTest {
   toolName: string;
   testData: Record<string, any>;
   testResult?: Record<string, any>;
+  evaluationResult?: Record<string, any>;
   status: "pending" | "running" | "completed" | "failed";
   errorMessage?: string;
   executionTimeMs?: number;
@@ -175,6 +176,7 @@ export class SharedMemoryManager {
           tool_name VARCHAR(255) NOT NULL,
           test_data JSONB NOT NULL,
           test_result JSONB,
+          evaluation_result JSONB,
           status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
           error_message TEXT,
           execution_time_ms INTEGER,
@@ -921,12 +923,13 @@ export class SharedMemoryManager {
     try {
       await client.query(
         `INSERT INTO task_test (
-          test_id, task_id, thread_id, tool_name, test_data, test_result,
+          test_id, task_id, thread_id, tool_name, test_data, test_result, evaluation_result,
           status, error_message, execution_time_ms, started_at, completed_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (test_id) 
         DO UPDATE SET 
           test_result = EXCLUDED.test_result,
+          evaluation_result = EXCLUDED.evaluation_result,
           status = EXCLUDED.status,
           error_message = EXCLUDED.error_message,
           execution_time_ms = EXCLUDED.execution_time_ms,
@@ -940,6 +943,7 @@ export class SharedMemoryManager {
           taskTest.toolName,
           JSON.stringify(taskTest.testData),
           taskTest.testResult ? JSON.stringify(taskTest.testResult) : null,
+          taskTest.evaluationResult ? JSON.stringify(taskTest.evaluationResult) : null,
           taskTest.status,
           taskTest.errorMessage,
           taskTest.executionTimeMs,
@@ -960,8 +964,8 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const query = `
-        INSERT INTO task_test (test_id, task_id, thread_id, tool_name, test_data, test_result, status, error_message, started_at)
-        VALUES ${taskTests.map((_, index) => `($${index * 9 + 1}, $${index * 9 + 2}, $${index * 9 + 3}, $${index * 9 + 4}, $${index * 9 + 5}, $${index * 9 + 6}, $${index * 9 + 7}, $${index * 9 + 8}, $${index * 9 + 9})`).join(", ")}
+        INSERT INTO task_test (test_id, task_id, thread_id, tool_name, test_data, test_result, evaluation_result, status, error_message, started_at)
+        VALUES ${taskTests.map((_, index) => `($${index * 10 + 1}, $${index * 10 + 2}, $${index * 10 + 3}, $${index * 10 + 4}, $${index * 10 + 5}, $${index * 10 + 6}, $${index * 10 + 7}, $${index * 10 + 8}, $${index * 10 + 9}, $${index * 10 + 10})`).join(", ")}
       `;
 
       const values: any[] = [];
@@ -973,6 +977,7 @@ export class SharedMemoryManager {
           taskTest.toolName,
           JSON.stringify(taskTest.testData),
           JSON.stringify(taskTest.testResult),
+          taskTest.evaluationResult ? JSON.stringify(taskTest.evaluationResult) : null,
           taskTest.status,
           taskTest.errorMessage,
           taskTest.startedAt || new Date()
@@ -996,12 +1001,13 @@ export class SharedMemoryManager {
       for (const taskTest of taskTests) {
         await client.query(
           `INSERT INTO task_test (
-            test_id, task_id, thread_id, tool_name, test_data, test_result,
+            test_id, task_id, thread_id, tool_name, test_data, test_result, evaluation_result,
             status, error_message, execution_time_ms, started_at, completed_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (test_id) 
           DO UPDATE SET 
             test_result = EXCLUDED.test_result,
+            evaluation_result = EXCLUDED.evaluation_result,
             status = EXCLUDED.status,
             error_message = EXCLUDED.error_message,
             execution_time_ms = EXCLUDED.execution_time_ms,
@@ -1015,6 +1021,7 @@ export class SharedMemoryManager {
             taskTest.toolName,
             JSON.stringify(taskTest.testData),
             taskTest.testResult ? JSON.stringify(taskTest.testResult) : null,
+            taskTest.evaluationResult ? JSON.stringify(taskTest.evaluationResult) : null,
             taskTest.status,
             taskTest.errorMessage,
             taskTest.executionTimeMs,
@@ -1038,7 +1045,7 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
-        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result,
+        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result, evaluation_result,
                 status, error_message, execution_time_ms, created_at, updated_at,
                 started_at, completed_at
          FROM task_test
@@ -1065,6 +1072,11 @@ export class SharedMemoryManager {
             ? JSON.parse(row.test_result)
             : row.test_result
           : undefined,
+        evaluationResult: row.evaluation_result
+          ? typeof row.evaluation_result === "string"
+            ? JSON.parse(row.evaluation_result)
+            : row.evaluation_result
+          : undefined,
         status: row.status,
         errorMessage: row.error_message,
         executionTimeMs: row.execution_time_ms,
@@ -1083,7 +1095,7 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
-        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result,
+        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result, evaluation_result,
                 status, error_message, execution_time_ms, created_at, updated_at,
                 started_at, completed_at
          FROM task_test
@@ -1106,6 +1118,11 @@ export class SharedMemoryManager {
             ? JSON.parse(row.test_result)
             : row.test_result
           : undefined,
+        evaluationResult: row.evaluation_result
+          ? typeof row.evaluation_result === "string"
+            ? JSON.parse(row.evaluation_result)
+            : row.evaluation_result
+          : undefined,
         status: row.status,
         errorMessage: row.error_message,
         executionTimeMs: row.execution_time_ms,
@@ -1124,7 +1141,7 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
-        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result,
+        `SELECT test_id, task_id, thread_id, tool_name, test_data, test_result, evaluation_result,
                 status, error_message, execution_time_ms, created_at, updated_at,
                 started_at, completed_at
          FROM task_test
@@ -1147,6 +1164,11 @@ export class SharedMemoryManager {
             ? JSON.parse(row.test_result)
             : row.test_result
           : undefined,
+        evaluationResult: row.evaluation_result
+          ? typeof row.evaluation_result === "string"
+            ? JSON.parse(row.evaluation_result)
+            : row.evaluation_result
+          : undefined,
         status: row.status,
         errorMessage: row.error_message,
         executionTimeMs: row.execution_time_ms,
@@ -1166,7 +1188,8 @@ export class SharedMemoryManager {
     status: string,
     result?: any,
     errorMessage?: string,
-    executionTimeMs?: number
+    executionTimeMs?: number,
+    evaluationResult?: any
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -1190,6 +1213,12 @@ export class SharedMemoryManager {
       if (executionTimeMs !== undefined) {
         query += `, execution_time_ms = $${paramIndex}`;
         params.push(executionTimeMs);
+        paramIndex++;
+      }
+
+      if (evaluationResult !== undefined) {
+        query += `, evaluation_result = $${paramIndex}`;
+        params.push(JSON.stringify(evaluationResult));
         paramIndex++;
       }
 
