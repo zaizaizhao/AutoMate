@@ -9,6 +9,7 @@
     "build": "turbo build:internal --filter=agents",
     "build:internal": "pnpm run clean && tsc",
     "clean": "rm -rf ./dist .turbo || true",
+    "db:init": "tsx ../../scripts/init-db.ts",
     "format": "prettier --config .prettierrc --write \"src\"",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix"

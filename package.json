@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "concurrently \"turbo dev --filter=web\" \"turbo dev --filter=agents\"",
     "build": "turbo build",
+    "db:init": "tsx scripts/init-db.ts",
     "turbo:command": "turbo",
     "format": "turbo format",
     "lint": "turbo lint",
@@ -35,6 +36,7 @@
     "@langchain/mcp-adapters": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.17.4",
     "@types/pg": "^8.15.5",
+    "dotenv": "^16.4.5",
     "pg": "^8.16.3"
   }
 }
