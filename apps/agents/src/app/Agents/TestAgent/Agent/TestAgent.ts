@@ -855,6 +855,6 @@ export class ExecuteTestAgent extends BaseAgent {
         store: this.memoryManager.getStore(),
         interruptBefore: [],
         interruptAfter: [],
-      });
+      }).withConfig({ recursionLimit: 256 });
   }
 }

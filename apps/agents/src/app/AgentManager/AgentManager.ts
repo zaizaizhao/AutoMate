@@ -61,6 +61,7 @@ export class MultiAgentCoordinator {
     // await executeTestAgentNode.invoke({
     //     messages: [new HumanMessage("测试")]
     // }, {
+    //     recursion_limit: 100,
     //     configurable: {
     //         thread_id: "default"
     //     }
@@ -78,63 +79,64 @@ export class MultiAgentCoordinator {
   }
 
   // 协调多个Agent执行任务
-  async executeWorkflow(userQuery: string): Promise<string> {
-    const sessionId = `session-${Date.now()}`;
-    const config = {
-      configurable: {
-        thread_id: sessionId,
-      },
-    };
+  // async executeWorkflow(userQuery: string): Promise<string> {
+  //   const sessionId = `session-${Date.now()}`;
+  //   const config = {
+  //     recursion_limit: 100,
+  //     configurable: {
+  //       thread_id: sessionId,
+  //     },
+  //   };
 
-    try {
-      // 1. 执行研究Agent
-      console.log("🔍 开始研究阶段...");
-      const researchAgent = this.agents.get("research");
-      await researchAgent.invoke(
-        {
-          messages: [new HumanMessage(userQuery)],
-        },
-        config
-      );
+  //   try {
+  //     // 1. 执行研究Agent
+  //     console.log("🔍 开始研究阶段...");
+  //     const researchAgent = this.agents.get("research");
+  //     await researchAgent.invoke(
+  //       {
+  //         messages: [new HumanMessage(userQuery)],
+  //       },
+  //       config
+  //     );
 
-      // 等待研究完成
-      await this.waitForMemoryUpdate("research_results");
+  //     // 等待研究完成
+  //     await this.waitForMemoryUpdate("research_results");
 
-      // 2. 执行分析Agent
-      console.log("📊 开始分析阶段...");
-      const analysisAgent = this.agents.get("analysis");
-      await analysisAgent.invoke(
-        {
-          messages: [new HumanMessage(userQuery)],
-        },
-        config
-      );
+  //     // 2. 执行分析Agent
+  //     console.log("📊 开始分析阶段...");
+  //     const analysisAgent = this.agents.get("analysis");
+  //     await analysisAgent.invoke(
+  //       {
+  //         messages: [new HumanMessage(userQuery)],
+  //       },
+  //       config
+  //     );
 
-      // 等待分析完成
-      await this.waitForMemoryUpdate("analysis_results");
+  //     // 等待分析完成
+  //     await this.waitForMemoryUpdate("analysis_results");
 
-      // 3. 执行总结Agent
-      console.log("📝 开始总结阶段...");
-      const summaryAgent = this.agents.get("summary");
-      await summaryAgent.invoke(
-        {
-          messages: [new HumanMessage(userQuery)],
-        },
-        config
-      );
+  //     // 3. 执行总结Agent
+  //     console.log("📝 开始总结阶段...");
+  //     const summaryAgent = this.agents.get("summary");
+  //     await summaryAgent.invoke(
+  //       {
+  //         messages: [new HumanMessage(userQuery)],
+  //       },
+  //       config
+  //     );
 
-      // 获取最终总结
-      const finalSummary = await this.memoryManager.getSharedMemory(
-        this.namespace,
-        "final_summary"
-      );
+  //     // 获取最终总结
+  //     const finalSummary = await this.memoryManager.getSharedMemory(
+  //       this.namespace,
+  //       "final_summary"
+  //     );
 
-      return finalSummary?.value?.summary || "总结生成失败";
-    } catch (error) {
-      console.error("工作流执行失败:", error);
-      throw error;
-    }
-  }
+  //     return finalSummary?.value?.summary || "总结生成失败";
+  //   } catch (error) {
+  //     console.error("工作流执行失败:", error);
+  //     throw error;
+  //   }
+  // }
 
   // 等待记忆更新
   private async waitForMemoryUpdate(

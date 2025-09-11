@@ -25,7 +25,7 @@ export class PlanAgent extends BaseAgent {
   }
 
   protected async initializellm() {
-    this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
+    this.llm = await loadChatModel("openai/Qwen/QwQ-32B");
   }
 
   async planNode(
@@ -293,7 +293,7 @@ export class PlanAgent extends BaseAgent {
     ].join("\n");
 
     const planning = (
-      await loadChatModel("openai/deepseek-ai/DeepSeek-V3")
+      await loadChatModel("openai/moonshotai/Kimi-K2-Instruct")
     ).withStructuredOutput(planOutputSchema, {
       name: "planOutputSchema",
       includeRaw: true,
@@ -530,6 +530,6 @@ export class PlanAgent extends BaseAgent {
       store: this.memoryManager.getStore(),
       interruptBefore: [],
       interruptAfter: [],
-    });
+    }).withConfig({ recursionLimit: 256 });
   }
 }

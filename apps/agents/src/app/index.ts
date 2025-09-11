@@ -70,5 +70,16 @@ const multiAgentCoordinator = new MultiAgentCoordinator(
   namespace
 );
 const workflow = multiAgentCoordinator.initializeAgents();
-export const graph = workflow.compile();
+// Note: recursionLimit should be passed when invoking the graph, not during compilation
+// Example: await graph.invoke({...}, { recursionLimit: 100 })
+
+export const graph = workflow.compile().withConfig({ recursionLimit: 256 });
+// 为LangGraph checkpointer提供thread_id，用于标识会话和存储检查点
+// const threadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+// await graph.invoke({}, { 
+//   recursionLimit: 100,
+//   configurable: {
+//     thread_id: threadId
+//   }
+// })
 graph.name = "agent";
