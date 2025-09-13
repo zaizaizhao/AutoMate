@@ -25,7 +25,7 @@ export class PlanAgent extends BaseAgent {
   }
 
   protected async initializellm() {
-    this.llm = await loadChatModel("openai/Qwen/QwQ-32B");
+    this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
   }
 
   async planNode(
@@ -51,9 +51,8 @@ export class PlanAgent extends BaseAgent {
     const threadId = (config?.configurable as any)?.thread_id ?? "default";
     this.lastThreadId = threadId;
     const batchMemKey = `planNode:${threadId}:toolBatch`;
-    // 优先使用运行时传入的 store；若不存在则回退为全局 MemoryManager 的 store，确保多轮调用一致可见
-    const store: any =
-      (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+    // 使用运行时传入的 store
+    const store: any = (config as any)?.store;
     const usingStore = !!(store && typeof store.get === "function");
     const ns = [
       "plans",
@@ -105,31 +104,12 @@ export class PlanAgent extends BaseAgent {
             totalTools,
             totalBatches,
           };
-          const primaryStore: any = this.memoryManager?.getStore?.();
-          let wroteRuntime = false;
-          let wrotePrimary = false;
           if (store && typeof store.put === "function") {
             await store.put(ns, "toolBatch", newState);
-            wroteRuntime = true;
-          }
-          if (
-            primaryStore &&
-            typeof primaryStore.put === "function" &&
-            primaryStore !== store
-          ) {
-            await primaryStore.put(ns, "toolBatch", newState);
-            wrotePrimary = true;
-          }
-          if (!wroteRuntime && !wrotePrimary) {
+          } else {
             await this.saveSharedMemory(batchMemKey, newState);
           }
-          const targets =
-            [
-              wroteRuntime ? "runtimeStore" : null,
-              wrotePrimary ? "primaryStore(DB)" : null,
-            ]
-              .filter(Boolean)
-              .join(" & ") || "sharedMemory";
+          const targets = store ? "store" : "sharedMemory";
           console.log(
             `[PlanAgent] Detected existing tasks for plan=${threadId}, batch=${batchIndex}. Skipping re-plan and advancing to ${nextBatchIndex}. Persisted batchState to: ${targets}`
           );
@@ -161,31 +141,12 @@ export class PlanAgent extends BaseAgent {
         totalTools,
         totalBatches,
       };
-      const primaryStore: any = this.memoryManager?.getStore?.();
-      let wroteRuntime = false;
-      let wrotePrimary = false;
       if (store && typeof store.put === "function") {
         await store.put(ns, "toolBatch", payload);
-        wroteRuntime = true;
-      }
-      if (
-        primaryStore &&
-        typeof primaryStore.put === "function" &&
-        primaryStore !== store
-      ) {
-        await primaryStore.put(ns, "toolBatch", payload);
-        wrotePrimary = true;
-      }
-      if (!wroteRuntime && !wrotePrimary) {
+      } else {
         await this.saveSharedMemory(batchMemKey, payload);
       }
-      const targets =
-        [
-          wroteRuntime ? "runtimeStore" : null,
-          wrotePrimary ? "primaryStore(DB)" : null,
-        ]
-          .filter(Boolean)
-          .join(" & ") || "sharedMemory";
+      const targets = store ? "store" : "sharedMemory";
       console.log(
         `[PlanAgent] Initialized/updated batch meta. Persisted to: ${targets}`
       );
@@ -392,31 +353,12 @@ export class PlanAgent extends BaseAgent {
             totalTools,
             totalBatches,
           };
-          const primaryStore: any = this.memoryManager?.getStore?.();
-          let wroteRuntime = false;
-          let wrotePrimary = false;
           if (store && typeof store.put === "function") {
             await store.put(ns, "toolBatch", newState);
-            wroteRuntime = true;
-          }
-          if (
-            primaryStore &&
-            typeof primaryStore.put === "function" &&
-            primaryStore !== store
-          ) {
-            await primaryStore.put(ns, "toolBatch", newState);
-            wrotePrimary = true;
-          }
-          if (!wroteRuntime && !wrotePrimary) {
+          } else {
             await this.saveSharedMemory(batchMemKey, newState);
           }
-          const targets =
-            [
-              wroteRuntime ? "runtimeStore" : null,
-              wrotePrimary ? "primaryStore(DB)" : null,
-            ]
-              .filter(Boolean)
-              .join(" & ") || "sharedMemory";
+          const targets = store ? "store" : "sharedMemory";
           console.log(
             `[PlanAgent] Advanced to next batch: ${batchIndex} -> ${nextBatchIndex}. Persisted batchState to: ${targets}`
           );
@@ -460,9 +402,8 @@ export class PlanAgent extends BaseAgent {
         return "plan-node";
       }
       const batchMemKey = `planNode:${threadId}:toolBatch`;
-      // 优先使用运行时传入的 store；若不存在则回退为全局 MemoryManager 的 store，确保多轮调用一致可见
-      const store: any =
-        (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+      // 使用运行时传入的 store
+      const store: any = (config as any)?.store;
       const ns = [
         "plans",
         this.config.namespace.project,
@@ -527,7 +468,7 @@ export class PlanAgent extends BaseAgent {
 
     return builder.compile({
       checkpointer: this.memoryManager.getCheckpointer(),
-      store: this.memoryManager.getStore(),
+      // store 配置通过 LangGraph 运行时传递
       interruptBefore: [],
       interruptAfter: [],
     }).withConfig({ recursionLimit: 256 });
