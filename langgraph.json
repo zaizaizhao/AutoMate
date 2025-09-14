@@ -4,8 +4,7 @@
     "."
   ],
   "graphs": {
-    "agent": "./apps/agents/src/app/index.ts:graph",
-    "agent1": "./apps/agents/src/react-agent/graph.ts:graph"
+    "agent": "./apps/agents/src/app/index.ts:graph"
   },
   "env": ".env"
 }
