@@ -8,19 +8,26 @@ export interface MCPServerConfig {
   transport: "http" | "stdio";
 }
 
+// 从环境变量读取MCP服务器配置
+function getMCPServerConfigs(): Record<string, MCPServerConfig> {
+  return {
+    "test-server": {
+      url: process.env.MCP_TEST_SERVER_URL || "http://localhost:8080/mcp",
+      transport: (process.env.MCP_TEST_SERVER_TRANSPORT as "http" | "stdio") || "http",
+    },
+    "json-writer": {
+      // JSON Writer MCP server for structured data writing
+      command: process.env.MCP_JSON_WRITER_COMMAND || "tsx",
+      args: process.env.MCP_JSON_WRITER_ARGS 
+        ? process.env.MCP_JSON_WRITER_ARGS.split(",")
+        : ["./src/mcp-servers/json-writer-server.ts"],
+      transport: (process.env.MCP_JSON_WRITER_TRANSPORT as "http" | "stdio") || "stdio",
+    },
+  };
+}
+
 // 预定义的MCP服务器配置
-export const MCP_SERVER_CONFIGS: Record<string, MCPServerConfig> = {
-  "test-server": {
-    url: "http://localhost:8080/mcp",
-    transport: "http",
-  },
-  "json-writer": {
-    // JSON Writer MCP server for structured data writing
-    command: "tsx",
-    args: ["./src/mcp-servers/json-writer-server.ts"],
-    transport: "stdio",
-  },
-};
+export const MCP_SERVER_CONFIGS: Record<string, MCPServerConfig> = getMCPServerConfigs();
 
 /**
  * MCP客户端管理器 - 支持按需连接特定的MCP服务器
