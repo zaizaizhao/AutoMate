@@ -561,7 +561,15 @@ export class ExecuteTestAgent extends BaseAgent {
           includeRaw: true,
         }
       );
-
+      // 获取当前批次的任务信息
+      const batchIndex = execProgress?.batchIndex ?? 0;
+      const tasks = await this.memoryManager.getTaskPlansByBatch(
+        threadId,
+        batchIndex
+      );
+      const completedIndex = execProgress?.taskIndex ?? 0;
+      const completedTask = tasks[completedIndex];
+      // 这里可以获取是否需要数据库验证，如果需要数据库验证，则需要使用tool
       // 构造评估提示
       const evaluationPrompt = formatEvaluationPrompt({
         toolName,
@@ -595,14 +603,7 @@ export class ExecuteTestAgent extends BaseAgent {
         failureAnalysis: evaluationResult.failureAnalysis,
       });
 
-      // 获取当前批次的任务信息
-      const batchIndex = execProgress?.batchIndex ?? 0;
-      const tasks = await this.memoryManager.getTaskPlansByBatch(
-        threadId,
-        batchIndex
-      );
-      const completedIndex = execProgress?.taskIndex ?? 0;
-      const completedTask = tasks[completedIndex];
+
 
       // 更新测试结果到task_test表
       if (completedTask?.taskId) {

@@ -31,7 +31,7 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
         "--transport",
         "stdio",
         "--dsn",
-        "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
+        process.env.TEST_DATABASE_URL ?? "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
       ],
       transport: "stdio",
     }
