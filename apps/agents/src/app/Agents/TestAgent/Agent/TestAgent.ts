@@ -8,7 +8,7 @@ import {
 } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AgentConfig, BaseAgent } from "../../../BaseAgent/BaseAgent.js";
-import { getTestServerTools } from "../../../mcp-servers/mcp-client.js";
+import { getPostgresqlHubTools, getTestServerTools } from "../../../mcp-servers/mcp-client.js";
 import { loadChatModel } from "../../../ModelUtils/ChatModel.js";
 import {
   buildSystemPrompt,

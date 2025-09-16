@@ -18,11 +18,23 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
     "json-writer": {
       // JSON Writer MCP server for structured data writing
       command: process.env.MCP_JSON_WRITER_COMMAND || "tsx",
-      args: process.env.MCP_JSON_WRITER_ARGS 
+      args: process.env.MCP_JSON_WRITER_ARGS
         ? process.env.MCP_JSON_WRITER_ARGS.split(",")
         : ["./src/mcp-servers/json-writer-server.ts"],
       transport: (process.env.MCP_JSON_WRITER_TRANSPORT as "http" | "stdio") || "stdio",
     },
+    "postgresql-hub": {
+      command: process.env.NODE_ENV === 'production'
+        ? "dbhub" // 生产环境使用全局安装
+        : "./node_modules/.bin/dbhub", // 开发环境使用本,
+      args: [
+        "--transport",
+        "stdio",
+        "--dsn",
+        "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
+      ],
+      transport: "stdio",
+    }
   };
 }
 
@@ -113,6 +125,11 @@ export async function getTools(): Promise<any[]> {
 // 专门为weather agent提供的工具获取函数
 export async function getTestServerTools(): Promise<any[]> {
   return await mcpClientManager.getToolsFromServer("test-server");
+}
+
+// 专门为postgresql-hub agent提供的工具获取函数
+export async function getPostgresqlHubTools(): Promise<any[]> {
+  return await mcpClientManager.getToolsFromServer("postgresql-hub");
 }
 
 // 专门为json-writer agent提供的工具获取函数
