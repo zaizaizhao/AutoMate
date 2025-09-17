@@ -1,4 +1,4 @@
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import {
   END,
   LangGraphRunnableConfig,
@@ -6,7 +6,7 @@ import {
   START,
   StateGraph,
 } from "@langchain/langgraph";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
+import { createReactAgent, ToolNode } from "@langchain/langgraph/prebuilt";
 import { AgentConfig, BaseAgent } from "../../../BaseAgent/BaseAgent.js";
 import { getPostgresqlHubTools, getTestServerTools } from "../../../mcp-servers/mcp-client.js";
 import { loadChatModel } from "../../../ModelUtils/ChatModel.js";
@@ -581,18 +581,34 @@ export class ExecuteTestAgent extends BaseAgent {
           taskIndex: execProgress?.taskIndex,
         },
       });
-
+      const dbTools = await getPostgresqlHubTools();
+      console.log("[llmEvaluateNode] dbTools:", dbTools);
+      
+      const reactAgent = await createReactAgent({
+        llm: evaluationLLM,
+        tools:[...dbTools],
+        responseFormat:evaluationOutputSchema
+      })
       // 调用LLM进行结构化评估
-      const response = await evaluationLLM.invoke([
-        {
+      const response = await reactAgent.invoke({messages:[{
           role: "system",
           content:
             "You are an expert tool execution evaluator. Analyze the tool execution results thoroughly and provide comprehensive structured feedback.",
         },
-        { role: "user", content: evaluationPrompt },
-      ]);
+        { role: "user", content: evaluationPrompt },]}
+      );
 
-      const evaluationResult = response.parsed || response;
+      // 调试：打印response对象的完整结构
+      console.log('[DEBUG] Response object structure:', {
+        response: response,
+        responseKeys: Object.keys(response || {}),
+        hasStructuredResponse: 'structuredResponse' in (response || {}),
+        hasStructured_response: 'structured_response' in (response || {}),
+        responseType: typeof response,
+        responseConstructor: response?.constructor?.name
+      });
+
+      const evaluationResult = response?.structuredResponse || response;
       const isSuccess = evaluationResult.status === "SUCCESS";
       const isError = evaluationResult.status === "FAILURE";
 
