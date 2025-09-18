@@ -23,7 +23,7 @@ export class ExecuteTestAgent extends BaseAgent {
   // private lastThreadId: string | null = null;
 
   protected async initializellm() {
-    this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
+    this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
   }
 
   constructor(config: AgentConfig) {
@@ -64,21 +64,6 @@ export class ExecuteTestAgent extends BaseAgent {
     const usingRuntimeStore = !!(
       runtimeStore && typeof runtimeStore.get === "function"
     );
-    console.log("[ExecuteTestNode] Store debug:", {
-      hasStore: !!candidateStore,
-      hasGet: !!(candidateStore && typeof candidateStore.get === "function"),
-      hasPut: !!(candidateStore && typeof candidateStore.put === "function"),
-      storeType: candidateType,
-      underlyingStoreType: underlyingType,
-      usingRuntimeStore,
-      decision: runtimeStore
-        ? "use runtime store"
-        : isAsyncBatchedInMemory
-        ? "ignore AsyncBatchedStore(InMemory) -> use shared memory"
-        : forceShared
-        ? "env forced shared memory"
-        : "no store provided",
-    });
 
     // 与 PlanAgent 保持一致的命名空间，用于读取批次信息
     const nsPlans = [
@@ -353,36 +338,44 @@ export class ExecuteTestAgent extends BaseAgent {
       toolDef?.schema ?? toolDef?.input_schema ?? toolDef?.parametersSchema;
     const suggestedParams = (task as any)?.parameters ?? {};
 
-    // 创建运行中的测试记录，并保存testId到执行进度中
-    let currentTestId: string | undefined;
+    // 创建或复用运行中的测试记录，并保存testId到执行进度中
+    let currentTestId: string | undefined = (execProgress as any)?.currentTestId;
     if ((task as any)?.taskId) {
       try {
-        currentTestId = `test_${(task as any).taskId}_${Date.now()}`;
-        const testResult = {
-          testId: currentTestId,
-          taskId: (task as any).taskId,
-          threadId: threadId,
-          toolName: toolName,
-          testData: suggestedParams,
-          status: "running" as const,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          startedAt: new Date(),
-        };
+        if (!currentTestId) {
+          currentTestId = `test_${(task as any).taskId}_${Date.now()}`;
+          const testResult = {
+            testId: currentTestId,
+            taskId: (task as any).taskId,
+            threadId: threadId,
+            toolName: toolName,
+            testData: suggestedParams,
+            status: "running" as const,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            startedAt: new Date(),
+          };
 
-        await this.memoryManager.saveTaskTest(testResult);
-        console.log(
-          `[ExecuteTestNode] Created running test record: ${testResult.testId}`
-        );
+          await this.memoryManager.saveTaskTest(testResult);
+          console.log(
+            `[ExecuteTestNode] Created running test record: ${testResult.testId}`
+          );
+        } else {
+          console.log(
+            `[ExecuteTestNode] Reusing existing running test record: ${currentTestId}`
+          );
+        }
 
-        // 将testId保存到执行进度中，以便后续更新使用
+        // 将testId保存到执行进度中，以便后续更新使用（持久化到运行时存储或共享内存）
         const progressWithTestId = { ...execProgress, currentTestId };
         if (usingRuntimeStore && typeof runtimeStore.put === "function") {
           await runtimeStore.put(nsExec, "executeProgress", progressWithTestId);
+        } else {
+          await this.saveSharedMemory(execMemKey, progressWithTestId);
         }
       } catch (e) {
         console.warn(
-          `[ExecuteTestNode] Failed to create running test record for ${(task as any).taskId}:`,
+          `[ExecuteTestNode] Failed to ensure running test record for ${(task as any).taskId}:`,
           e
         );
       }
@@ -520,6 +513,10 @@ export class ExecuteTestAgent extends BaseAgent {
     );
   }
 
+  dbValidateToolNode(){
+
+  }
+
   async llmEvaluateNode(
     state: typeof MessagesAnnotation.State,
     config: LangGraphRunnableConfig
@@ -535,13 +532,20 @@ export class ExecuteTestAgent extends BaseAgent {
     }
 
     const threadId = (config?.configurable as any)?.thread_id ?? "default";
-    const runtimeStore: any =
-      (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+    // 与 ExecuteTestNode 保持一致的存储选择逻辑（忽略 CLI 注入的 AsyncBatched InMemory 存储，允许环境变量强制共享内存）
+    const candidateStore: any = (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+    const candidateType = candidateStore?.constructor?.name;
+    const underlyingType = candidateStore?.store?.constructor?.name;
+    const isAsyncBatchedInMemory =
+      candidateType === "AsyncBatchedStore" && underlyingType === "InMemoryStore";
+    const forceShared =
+      (process.env.FORCE_SHARED_MEMORY ?? process.env.USE_SHARED_STORE ?? "").toString() === "1";
+    const runtimeStore: any = !candidateStore || isAsyncBatchedInMemory || forceShared ? undefined : candidateStore;
     const usingRuntimeStore = !!(
       runtimeStore && typeof runtimeStore.get === "function"
     );
 
-    // 获取执行进度
+    // 获取执行进度（优先 runtimeStore，回退到共享内存）
     const nsExec = [
       "plans",
       this.config.namespace.project,
@@ -549,15 +553,16 @@ export class ExecuteTestAgent extends BaseAgent {
       this.config.namespace.agent_type,
       threadId,
     ];
+    const execMemKey = `executeNode:${threadId}:executeProgress`;
     let execProgressRaw = usingRuntimeStore
       ? await runtimeStore.get(nsExec, "executeProgress")
-      : undefined;
+      : await this.getSharedMemory(execMemKey);
     let execProgress =
       execProgressRaw &&
       typeof execProgressRaw === "object" &&
       "value" in (execProgressRaw as any)
         ? (execProgressRaw as any).value
-        : execProgressRaw;
+        : (execProgressRaw as any);
 
     // 查找最近的工具执行结果
     const msgs: any[] = state.messages as any[];
@@ -591,13 +596,13 @@ export class ExecuteTestAgent extends BaseAgent {
 
     try {
       // 创建带结构化输出的LLM实例
-      // const evaluationLLM = this.llm.withStructuredOutput(
-      //   evaluationOutputSchema,
-      //   {
-      //     name: "evaluationOutputSchema",
-      //     includeRaw: true,
-      //   }
-      // );
+      const evaluationLLM = this.llm.withStructuredOutput(
+        evaluationOutputSchema,
+        {
+          name: "evaluationOutputSchema",
+          includeRaw: true,
+        }
+      );
       // 获取当前批次的任务信息
       const batchIndex = execProgress?.batchIndex ?? 0;
       const tasks = await this.memoryManager.getTaskPlansByBatch(
@@ -607,6 +612,10 @@ export class ExecuteTestAgent extends BaseAgent {
       const completedIndex = execProgress?.taskIndex ?? 0;
       const completedTask = tasks[completedIndex];
       // 这里可以获取是否需要数据库验证，如果需要数据库验证，则需要使用tool
+      // const dbTools = await getPostgresqlHubTools();
+      // console.log("[llmEvaluateNode] dbTools:", dbTools);
+      // 使用正确的结构化输出方式
+      // 根据LangGraph文档，应该通过structuredResponse字段访问结果
       // 构造评估提示
       const evaluationPrompt = formatEvaluationPrompt({
         toolName,
@@ -618,35 +627,18 @@ export class ExecuteTestAgent extends BaseAgent {
           taskIndex: execProgress?.taskIndex,
         },
       });
-      const dbTools = await getPostgresqlHubTools();
-      console.log("[llmEvaluateNode] dbTools:", dbTools);
-      const llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
-      const reactAgent = await createReactAgent({
-        llm: llm,
-        tools:dbTools,
-        responseFormat:evaluationOutputSchema
-      })
-      // 使用正确的结构化输出方式
-      // 根据LangGraph文档，应该通过structuredResponse字段访问结果
-      const response = await reactAgent.invoke({messages:[{
+
+      // 调用LLM进行结构化评估
+      const response = await evaluationLLM.invoke([
+        {
           role: "system",
           content:
             "You are an expert tool execution evaluator. Analyze the tool execution results thoroughly and provide comprehensive structured feedback.",
         },
-        { role: "user", content: evaluationPrompt },]}
-      );
-      console.log("调用llm完毕",response);
-      // // 调试：打印response对象的完整结构
-      // console.log('[DEBUG] Response object structure:', {
-      //   response: response,
-      //   responseKeys: Object.keys(response || {}),
-      //   hasStructuredResponse: 'structuredResponse' in (response || {}),
-      //   hasStructured_response: 'structured_response' in (response || {}),
-      //   responseType: typeof response,
-      //   responseConstructor: response?.constructor?.name
-      // });
+        { role: "user", content: evaluationPrompt },
+      ]);
 
-      const evaluationResult = response?.structuredResponse || response;
+      const evaluationResult = response.parsed || response;
       const isSuccess = evaluationResult.status === "SUCCESS";
       const isError = evaluationResult.status === "FAILURE";
 
@@ -656,14 +648,35 @@ export class ExecuteTestAgent extends BaseAgent {
         confidence: evaluationResult.confidence,
         failureAnalysis: evaluationResult.failureAnalysis,
       });
-
-
-
       // 更新测试结果到task_test表
       if (completedTask?.taskId) {
         try {
           const status = isError ? "failed" : "completed";
-          const currentTestId = (execProgress as any)?.currentTestId;
+          let currentTestId = (execProgress as any)?.currentTestId;
+
+          // 兜底：如果没有拿到currentTestId，尝试查找该任务在本线程的最新running记录进行更新，避免重复插入
+          if (!currentTestId && completedTask?.taskId) {
+            try {
+              const tests = await this.memoryManager.getTaskTestsByTaskId(completedTask.taskId);
+              const latestRunning = tests
+                .filter(t => t.threadId === threadId && t.status === "running" && (t.toolName === toolName || !t.toolName))
+                .sort((a, b) => (a.createdAt?.getTime?.() ?? 0) - (b.createdAt?.getTime?.() ?? 0))
+                .pop();
+              if (latestRunning) {
+                currentTestId = latestRunning.testId;
+                // 同步保存到执行进度，避免后续再次遗漏
+                const progressWithTestId = { ...execProgress, currentTestId };
+                if (usingRuntimeStore && typeof runtimeStore.put === "function") {
+                  await runtimeStore.put(nsExec, "executeProgress", progressWithTestId);
+                } else {
+                  await this.saveSharedMemory(execMemKey, progressWithTestId);
+                }
+                console.log(`[llmEvaluateNode] Fallback matched running test record: ${currentTestId} for task ${completedTask.taskId}`);
+              }
+            } catch (e) {
+              console.warn(`[llmEvaluateNode] Fallback query for running test failed:`, e);
+            }
+          }
 
           // 构造详细的测试结果数据
           const detailedTestResult = {
@@ -792,9 +805,12 @@ export class ExecuteTestAgent extends BaseAgent {
       const progressed = {
         ...execProgress,
         taskIndex: (execProgress?.taskIndex ?? 0) + 1,
+        currentTestId: undefined,
       };
       if (usingRuntimeStore && typeof runtimeStore.put === "function") {
         await runtimeStore.put(nsExec, "executeProgress", progressed);
+      } else {
+        await this.saveSharedMemory(execMemKey, progressed);
       }
       console.log(
         `[llmEvaluateNode] Advanced executeProgress to taskIndex=${progressed.taskIndex}. Data storage completed for task ${completedTask?.taskId}`
