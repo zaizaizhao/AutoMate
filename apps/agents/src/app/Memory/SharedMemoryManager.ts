@@ -221,14 +221,23 @@ export class SharedMemoryManager {
       metadata?: Record<string, any>;
     }
   ): Promise<void> {
+    console.log("[SharedMemoryManager] setSharedMemory called with:", {
+      namespace,
+      key,
+      value: JSON.stringify(value).substring(0, 100) + "...",
+      options
+    });
+    
     const namespacePath = this.getNamespacePath(namespace);
     const expiresAt = options?.expiresIn
       ? new Date(Date.now() + options.expiresIn * 1000)
       : null;
 
+    console.log("[SharedMemoryManager] About to execute INSERT with namespacePath:", namespacePath);
+
     const client = await this.pool.connect();
     try {
-      await client.query(
+      const result = await client.query(
         `INSERT INTO memory_store (namespace_path, key, value, expires_at, metadata, updated_at)
          VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT (namespace_path, key)
@@ -245,6 +254,10 @@ export class SharedMemoryManager {
           JSON.stringify(options?.metadata || {}),
         ]
       );
+      console.log("[SharedMemoryManager] INSERT successful, rowCount:", result.rowCount);
+    } catch (error) {
+      console.error("[SharedMemoryManager] INSERT failed:", error);
+      throw error;
     } finally {
       client.release();
     }

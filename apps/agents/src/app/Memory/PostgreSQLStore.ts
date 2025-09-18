@@ -37,15 +37,28 @@ export class PostgreSQLStore extends BaseStore {
   }
 
   async put(namespace: string[], key: string, value: any): Promise<void> {
+    console.log("\n=== [PostgreSQLStore] PUT METHOD CALLED ===");
+    console.log("[PostgreSQLStore] put method called with:", {
+      namespace,
+      key,
+      value,
+    });
+    console.log("[PostgreSQLStore] Stack trace:", new Error().stack);
     const client = await this.pool.connect();
     try {
-      await client.query(
+      console.log("[PostgreSQLStore] About to execute INSERT query");
+      const result = await client.query(
         `INSERT INTO memory_store (namespace_path, key, value, updated_at)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (namespace_path, key)
          DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
         [namespace, key, JSON.stringify(value)]
       );
+      console.log("[PostgreSQLStore] INSERT query result:", result.rowCount);
+      console.log("=== [PostgreSQLStore] PUT METHOD COMPLETED ===");
+    } catch (error) {
+      console.error("[PostgreSQLStore] INSERT query failed:", error);
+      throw error;
     } finally {
       client.release();
     }
@@ -87,6 +100,9 @@ export class PostgreSQLStore extends BaseStore {
   async batch<Op extends Operation[]>(
     operations: Op
   ): Promise<OperationResults<Op>> {
+    console.log("\n=== [PostgreSQLStore] BATCH METHOD CALLED ===");
+    console.log("[PostgreSQLStore] batch method called with operations:", operations.length);
+    console.log("[PostgreSQLStore] Stack trace:", new Error().stack);
     const client = await this.pool.connect();
     const results: any[] = [];
 
@@ -281,5 +297,37 @@ export class PostgreSQLStore extends BaseStore {
     } finally {
       client.release();
     }
+  }
+
+  // 实现BaseStore要求的方法
+  async listNamespaces(options?: {
+    limit?: number;
+    offset?: number;
+    maxDepth?: number;
+  }): Promise<string[][]> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT DISTINCT namespace_path FROM memory_store
+         ORDER BY namespace_path
+         ${options?.limit ? `LIMIT ${options.limit}` : ''}
+         ${options?.offset ? `OFFSET ${options.offset}` : ''}`,
+        []
+      );
+      return result.rows.map(row => row.namespace_path);
+    } finally {
+      client.release();
+    }
+  }
+
+  async start(): Promise<void> {
+    console.log("[PostgreSQLStore] start() called");
+    // PostgreSQL连接池已经在构造函数中初始化，这里不需要额外操作
+  }
+
+  async stop(): Promise<void> {
+    console.log("[PostgreSQLStore] stop() called");
+    // 关闭连接池
+    await this.pool.end();
   }
 }

@@ -23,7 +23,7 @@ export class ExecuteTestAgent extends BaseAgent {
   // private lastThreadId: string | null = null;
 
   protected async initializellm() {
-    this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
+    this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
   }
 
   constructor(config: AgentConfig) {
@@ -48,11 +48,37 @@ export class ExecuteTestAgent extends BaseAgent {
     const toolCallingModel = this.llm.bindTools(tools);
 
     const threadId = (config?.configurable as any)?.thread_id ?? "default";
+    // Prefer runtime store unless it's the CLI-injected InMemory AsyncBatchedStore, or env forces shared memory
+    const candidateStore: any = (config as any)?.store;
+    const candidateType = candidateStore?.constructor?.name;
+    const underlyingType = candidateStore?.store?.constructor?.name;
+    const isAsyncBatchedInMemory =
+      candidateType === "AsyncBatchedStore" && underlyingType === "InMemoryStore";
+    const forceShared =
+      (process.env.FORCE_SHARED_MEMORY ?? process.env.USE_SHARED_STORE ?? "")
+        .toString() === "1";
     const runtimeStore: any =
-      (config as any)?.store ?? (this.memoryManager?.getStore?.() as any);
+      !candidateStore || isAsyncBatchedInMemory || forceShared
+        ? undefined
+        : candidateStore;
     const usingRuntimeStore = !!(
       runtimeStore && typeof runtimeStore.get === "function"
     );
+    console.log("[ExecuteTestNode] Store debug:", {
+      hasStore: !!candidateStore,
+      hasGet: !!(candidateStore && typeof candidateStore.get === "function"),
+      hasPut: !!(candidateStore && typeof candidateStore.put === "function"),
+      storeType: candidateType,
+      underlyingStoreType: underlyingType,
+      usingRuntimeStore,
+      decision: runtimeStore
+        ? "use runtime store"
+        : isAsyncBatchedInMemory
+        ? "ignore AsyncBatchedStore(InMemory) -> use shared memory"
+        : forceShared
+        ? "env forced shared memory"
+        : "no store provided",
+    });
 
     // 与 PlanAgent 保持一致的命名空间，用于读取批次信息
     const nsPlans = [
@@ -88,9 +114,10 @@ export class ExecuteTestAgent extends BaseAgent {
       this.config.namespace.agent_type,
       threadId,
     ];
+    const execMemKey = `executeNode:${threadId}:executeProgress`;
     let execProgressProbeRaw = usingRuntimeStore
       ? await runtimeStore.get(nsExecReset, "executeProgress")
-      : undefined;
+      : await this.getSharedMemory(execMemKey);
     let execProgressProbe =
       execProgressProbeRaw &&
       typeof execProgressProbeRaw === "object" &&
@@ -113,11 +140,15 @@ export class ExecuteTestAgent extends BaseAgent {
         };
         if (usingRuntimeStore && typeof runtimeStore.put === "function") {
           await runtimeStore.put(nsPlans, "toolBatch", resetState);
+        } else {
+          await this.saveSharedMemory(batchMemKey, resetState);
         }
         // 初始化执行进度为第0批第0个任务
         const initProgress = { batchIndex: 0, taskIndex: 0 };
         if (usingRuntimeStore && typeof runtimeStore.put === "function") {
           await runtimeStore.put(nsExecReset, "executeProgress", initProgress);
+        } else {
+          await this.saveSharedMemory(execMemKey, initProgress);
         }
         existingBatchState = resetState;
         console.log(
@@ -167,7 +198,7 @@ export class ExecuteTestAgent extends BaseAgent {
     ];
     let execProgressRaw = usingRuntimeStore
       ? await runtimeStore.get(nsExec, "executeProgress")
-      : undefined;
+      : await this.getSharedMemory(execMemKey);
     let execProgress =
       execProgressRaw &&
       typeof execProgressRaw === "object" &&
@@ -176,9 +207,11 @@ export class ExecuteTestAgent extends BaseAgent {
         : (execProgressRaw ?? undefined);
     if (!execProgress || execProgress.batchIndex !== batchIndex) {
       execProgress = { batchIndex, taskIndex: 0 };
-      // 保存到运行时存储
+      // 保存到运行时存储或共享内存
       if (usingRuntimeStore && typeof runtimeStore.put === "function") {
         await runtimeStore.put(nsExec, "executeProgress", execProgress);
+      } else {
+        await this.saveSharedMemory(execMemKey, execProgress);
       }
     }
 
@@ -204,10 +237,14 @@ export class ExecuteTestAgent extends BaseAgent {
         const newState = { ...existingBatchState, batchIndex: nextBatch };
         if (usingRuntimeStore && typeof runtimeStore.put === "function") {
           await runtimeStore.put(nsPlans, "toolBatch", newState);
+        } else {
+          await this.saveSharedMemory(batchMemKey, newState);
         }
         const newProgress = { batchIndex: nextBatch, taskIndex: 0 };
         if (usingRuntimeStore && typeof runtimeStore.put === "function") {
           await runtimeStore.put(nsExec, "executeProgress", newProgress);
+        } else {
+          await this.saveSharedMemory(execMemKey, newProgress);
         }
         console.log(
           `[ExecuteTestNode] Batch ${batchIndex} completed. Advanced to next batch: ${nextBatch}.`
@@ -520,7 +557,7 @@ export class ExecuteTestAgent extends BaseAgent {
       typeof execProgressRaw === "object" &&
       "value" in (execProgressRaw as any)
         ? (execProgressRaw as any).value
-        : (execProgressRaw ?? undefined);
+        : execProgressRaw;
 
     // 查找最近的工具执行结果
     const msgs: any[] = state.messages as any[];
@@ -554,13 +591,13 @@ export class ExecuteTestAgent extends BaseAgent {
 
     try {
       // 创建带结构化输出的LLM实例
-      const evaluationLLM = this.llm.withStructuredOutput(
-        evaluationOutputSchema,
-        {
-          name: "evaluationOutputSchema",
-          includeRaw: true,
-        }
-      );
+      // const evaluationLLM = this.llm.withStructuredOutput(
+      //   evaluationOutputSchema,
+      //   {
+      //     name: "evaluationOutputSchema",
+      //     includeRaw: true,
+      //   }
+      // );
       // 获取当前批次的任务信息
       const batchIndex = execProgress?.batchIndex ?? 0;
       const tasks = await this.memoryManager.getTaskPlansByBatch(
@@ -583,13 +620,14 @@ export class ExecuteTestAgent extends BaseAgent {
       });
       const dbTools = await getPostgresqlHubTools();
       console.log("[llmEvaluateNode] dbTools:", dbTools);
-      
+      const llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
       const reactAgent = await createReactAgent({
-        llm: evaluationLLM,
-        tools:[...dbTools],
+        llm: llm,
+        tools:dbTools,
         responseFormat:evaluationOutputSchema
       })
-      // 调用LLM进行结构化评估
+      // 使用正确的结构化输出方式
+      // 根据LangGraph文档，应该通过structuredResponse字段访问结果
       const response = await reactAgent.invoke({messages:[{
           role: "system",
           content:
@@ -597,16 +635,16 @@ export class ExecuteTestAgent extends BaseAgent {
         },
         { role: "user", content: evaluationPrompt },]}
       );
-
-      // 调试：打印response对象的完整结构
-      console.log('[DEBUG] Response object structure:', {
-        response: response,
-        responseKeys: Object.keys(response || {}),
-        hasStructuredResponse: 'structuredResponse' in (response || {}),
-        hasStructured_response: 'structured_response' in (response || {}),
-        responseType: typeof response,
-        responseConstructor: response?.constructor?.name
-      });
+      console.log("调用llm完毕",response);
+      // // 调试：打印response对象的完整结构
+      // console.log('[DEBUG] Response object structure:', {
+      //   response: response,
+      //   responseKeys: Object.keys(response || {}),
+      //   hasStructuredResponse: 'structuredResponse' in (response || {}),
+      //   hasStructured_response: 'structured_response' in (response || {}),
+      //   responseType: typeof response,
+      //   responseConstructor: response?.constructor?.name
+      // });
 
       const evaluationResult = response?.structuredResponse || response;
       const isSuccess = evaluationResult.status === "SUCCESS";
@@ -869,7 +907,6 @@ export class ExecuteTestAgent extends BaseAgent {
       .addEdge("llm-evaluate-node", "execute-test-node")
       .compile({
         checkpointer: this.memoryManager.getCheckpointer(),
-        store: this.memoryManager.getStore(),
         interruptBefore: [],
         interruptAfter: [],
       }).withConfig({ recursionLimit: 256 });

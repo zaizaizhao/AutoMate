@@ -51,9 +51,26 @@ export class PlanAgent extends BaseAgent {
     const threadId = (config?.configurable as any)?.thread_id ?? "default";
     this.lastThreadId = threadId;
     const batchMemKey = `planNode:${threadId}:toolBatch`;
-    // 使用运行时传入的 store
-    const store: any = (config as any)?.store;
+    // 使用运行时传入的 store（如果是 CLI 注入的 InMemory AsyncBatchedStore，则忽略，回退到 SharedMemoryManager）
+    const candidateStore: any = (config as any)?.store;
+    const candidateType = candidateStore?.constructor?.name;
+    const underlyingType = candidateStore?.store?.constructor?.name;
+    const isAsyncBatchedInMemory =
+      candidateType === "AsyncBatchedStore" && underlyingType === "InMemoryStore";
+    const forceShared =
+      (process.env.FORCE_SHARED_MEMORY ?? process.env.USE_SHARED_STORE ?? "")
+        .toString() === "1";
+    const store: any = !candidateStore || isAsyncBatchedInMemory || forceShared ? undefined : candidateStore;
     const usingStore = !!(store && typeof store.get === "function");
+    console.log("[PlanAgent] Store debug:", {
+      hasStore: !!candidateStore,
+      hasGet: !!(candidateStore && typeof candidateStore.get === "function"),
+      hasPut: !!(candidateStore && typeof candidateStore.put === "function"),
+      storeType: candidateType,
+      underlyingStoreType: underlyingType,
+      usingStore,
+      decision: store ? "use runtime store" : isAsyncBatchedInMemory ? "ignore AsyncBatchedStore(InMemory) -> use shared memory" : forceShared ? "env forced shared memory" : "no store provided"
+    });
     const ns = [
       "plans",
       this.config.namespace.project,
@@ -142,7 +159,37 @@ export class PlanAgent extends BaseAgent {
         totalBatches,
       };
       if (store && typeof store.put === "function") {
-        await store.put(ns, "toolBatch", payload);
+        console.log("[PlanAgent] About to call store.put with:", { ns, key: "toolBatch", payload });
+        console.log("[PlanAgent] Store type debug info:", {
+          storeConstructorName: store.constructor.name,
+          storeKeys: Object.keys(store),
+          hasUnderlyingStore: !!store.store,
+          underlyingStoreType: store.store ? store.store.constructor.name : 'none',
+          storePrototype: Object.getPrototypeOf(store).constructor.name
+        });
+        try {
+          console.log(store);
+          
+          await store.put(ns, "toolBatch", payload);
+          console.log("[PlanAgent] store.put completed successfully",payload);
+          
+          // 尝试强制刷新AsyncBatchedStore
+          if (store.store && typeof store.store.put === "function") {
+            console.log("[PlanAgent] Attempting direct call to underlying store.put");
+            await store.store.put(ns, "toolBatch_direct", payload);
+            console.log("[PlanAgent] Direct store.put completed");
+          }
+          
+          // 使用put方法替代batch方法避免AsyncBatchedStore问题
+          if (store && typeof store.put === "function") {
+            console.log("[PlanAgent] Using put method instead of batch to avoid AsyncBatchedStore issue");
+            await store.put(ns, "toolBatch_batch", payload);
+            console.log("[PlanAgent] store.put completed");
+          }
+        } catch (error) {
+          console.error("[PlanAgent] store.put failed:", error);
+          throw error;
+        }
       } else {
         await this.saveSharedMemory(batchMemKey, payload);
       }
@@ -402,8 +449,26 @@ export class PlanAgent extends BaseAgent {
         return "plan-node";
       }
       const batchMemKey = `planNode:${threadId}:toolBatch`;
-      // 使用运行时传入的 store
-      const store: any = (config as any)?.store;
+      // 使用与 planNode 一致的存储选择逻辑：忽略 CLI 注入的 InMemory AsyncBatchedStore，必要时强制使用共享内存
+      const candidateStore: any = (config as any)?.store;
+      const candidateType = candidateStore?.constructor?.name;
+      const underlyingType = candidateStore?.store?.constructor?.name;
+      const isAsyncBatchedInMemory =
+        candidateType === "AsyncBatchedStore" && underlyingType === "InMemoryStore";
+      const forceShared =
+        (process.env.FORCE_SHARED_MEMORY ?? process.env.USE_SHARED_STORE ?? "")
+          .toString() === "1";
+      const store: any = !candidateStore || isAsyncBatchedInMemory || forceShared ? undefined : candidateStore;
+      const usingStore = !!(store && typeof store.get === "function");
+      console.log("[PlanAgent] Router store debug:", {
+        hasStore: !!candidateStore,
+        hasGet: !!(candidateStore && typeof candidateStore.get === "function"),
+        hasPut: !!(candidateStore && typeof candidateStore.put === "function"),
+        storeType: candidateType,
+        underlyingStoreType: underlyingType,
+        usingStore,
+        decision: store ? "use runtime store" : isAsyncBatchedInMemory ? "ignore AsyncBatchedStore(InMemory) -> use shared memory" : forceShared ? "env forced shared memory" : "no store provided"
+      });
       const ns = [
         "plans",
         this.config.namespace.project,
@@ -411,10 +476,9 @@ export class PlanAgent extends BaseAgent {
         this.config.namespace.agent_type,
         threadId,
       ];
-      const batchStateRaw =
-        store && typeof store.get === "function"
-          ? await store.get(ns, "toolBatch")
-          : await this.getSharedMemory(batchMemKey);
+      const batchStateRaw = usingStore
+        ? await store.get(ns, "toolBatch")
+        : await this.getSharedMemory(batchMemKey);
       const batchState =
         batchStateRaw &&
         typeof batchStateRaw === "object" &&

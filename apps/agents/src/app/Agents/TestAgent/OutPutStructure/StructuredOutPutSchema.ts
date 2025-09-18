@@ -50,21 +50,23 @@ export const evaluationOutputSchema = z.object({
       .describe("Assessment of the failure's impact on the overall test"),
     technicalDetails: z.string()
       .max(400)
+      .nullable()
       .optional()
       .describe("Technical details about the failure (error messages, stack traces, etc.)")
-  }).optional().describe("Detailed failure analysis (only present when status is FAILURE)"),
+  }).nullable().optional().describe("Detailed failure analysis (only present when status is FAILURE)"),
   
-  // Remediation suggestions (optional, mainly for failures but can also suggest improvements for successes)
+  // Remediation suggestions (optional)
   remediationSuggestions: z.array(RemediationAction)
     .max(5)
+    .nullable()
     .optional()
     .describe("Suggested actions to fix the issue or improve the implementation"),
   
-  // Additional context
+  // Execution context
   executionContext: z.object({
     toolName: z.string().describe("Name of the tool that was executed"),
-    executionTime: z.number().optional().describe("Execution time in milliseconds if available"),
-    resourcesUsed: z.array(z.string()).optional().describe("Resources or dependencies that were involved")
+    executionTime: z.number().nullable().optional().describe("Execution time in milliseconds if available"),
+    resourcesUsed: z.array(z.string()).nullable().optional().describe("Resources or dependencies that were involved")
   }).describe("Context information about the tool execution")
 }).refine(
   (data) => {
