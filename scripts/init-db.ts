@@ -40,8 +40,13 @@ async function initializeDatabase() {
     await DatabaseInitializer.ensureDatabaseExists(databaseUrl);
     console.log('✅ 数据库检查完成');
     
-    // 步骤2: 执行数据库迁移
-    console.log('\n📋 步骤2: 执行数据库迁移...');
+    // 步骤2: 创建基础表结构
+    console.log('\n📋 步骤2: 创建基础表结构...');
+    await DatabaseInitializer.createBaseTables(databaseUrl);
+    console.log('✅ 基础表结构创建完成');
+    
+    // 步骤3: 执行数据库迁移
+    console.log('\n📋 步骤3: 执行数据库迁移...');
     await DatabaseInitializer.migrateDatabase(databaseUrl);
     console.log('✅ 数据库迁移完成');
     

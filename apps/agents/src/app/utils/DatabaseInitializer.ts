@@ -92,6 +92,137 @@ export class DatabaseInitializer {
   }
 
   /**
+   * 创建基础表结构
+   * @param connectionString 完整的数据库连接字符串
+   */
+  static async createBaseTables(connectionString: string): Promise<void> {
+    console.log("[DB Init] 开始创建基础表结构...");
+    
+    const pool = new Pool({
+      connectionString: connectionString,
+      max: 1,
+      idleTimeoutMillis: 5000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    try {
+      const client = await pool.connect();
+      
+      try {
+        // 创建 memory_store 表
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS memory_store (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            namespace_path TEXT[] NOT NULL,
+            key TEXT NOT NULL,
+            value JSONB NOT NULL,
+            metadata JSONB DEFAULT '{}',
+            expires_at TIMESTAMP WITH TIME ZONE,
+            data_type VARCHAR(50),
+            tags JSONB,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(namespace_path, key)
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_memory_store_namespace_key ON memory_store(namespace_path, key);
+          CREATE INDEX IF NOT EXISTS idx_memory_store_expires_at ON memory_store(expires_at);
+          CREATE INDEX IF NOT EXISTS idx_memory_store_data_type ON memory_store(data_type);
+          CREATE INDEX IF NOT EXISTS idx_memory_store_tags ON memory_store USING GIN(tags);
+        `);
+
+        // 创建 task_plans 表
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS task_plans (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            plan_id VARCHAR(255) NOT NULL,
+            batch_index INTEGER NOT NULL,
+            task_id VARCHAR(255) NOT NULL UNIQUE,
+            tool_name VARCHAR(255) NOT NULL,
+            description TEXT,
+            parameters JSONB,
+            complexity VARCHAR(20) CHECK (complexity IN ('low', 'medium', 'high')),
+            is_required_validate_by_database BOOLEAN DEFAULT false,
+            status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+            result JSONB,
+            error_message TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_task_plans_plan_id ON task_plans(plan_id);
+          CREATE INDEX IF NOT EXISTS idx_task_plans_batch_index ON task_plans(plan_id, batch_index);
+          CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
+          CREATE INDEX IF NOT EXISTS idx_task_plans_tool_name ON task_plans(tool_name);
+          CREATE INDEX IF NOT EXISTS idx_task_plans_status ON task_plans(status);
+          CREATE INDEX IF NOT EXISTS idx_task_plans_complexity ON task_plans(complexity);
+        `);
+
+        // 创建 plan_progress 表
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS plan_progress (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            plan_id VARCHAR(255) NOT NULL UNIQUE,
+            total_batches INTEGER NOT NULL DEFAULT 0,
+            completed_batches INTEGER NOT NULL DEFAULT 0,
+            failed_batches INTEGER NOT NULL DEFAULT 0,
+            current_batch_index INTEGER NOT NULL DEFAULT 0,
+            overall_success_rate DECIMAL(5,2) DEFAULT 0.00,
+            status VARCHAR(20) DEFAULT 'planning' CHECK (status IN ('planning', 'running', 'completed', 'failed', 'paused')),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_plan_progress_plan_id ON plan_progress(plan_id);
+          CREATE INDEX IF NOT EXISTS idx_plan_progress_status ON plan_progress(status);
+          CREATE INDEX IF NOT EXISTS idx_plan_progress_last_updated ON plan_progress(last_updated DESC);
+        `);
+
+        // 创建 task_test 表（包含evaluation_result字段）
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS task_test (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            test_id VARCHAR(255) NOT NULL UNIQUE,
+            task_id VARCHAR(255) NOT NULL,
+            thread_id VARCHAR(255) NOT NULL,
+            tool_name VARCHAR(255) NOT NULL,
+            test_data JSONB NOT NULL,
+            test_result JSONB,
+            evaluation_result JSONB,
+            status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+            error_message TEXT,
+            execution_time_ms INTEGER,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_task_test_test_id ON task_test(test_id);
+          CREATE INDEX IF NOT EXISTS idx_task_test_task_id ON task_test(task_id);
+          CREATE INDEX IF NOT EXISTS idx_task_test_thread_id ON task_test(thread_id);
+          CREATE INDEX IF NOT EXISTS idx_task_test_tool_name ON task_test(tool_name);
+          CREATE INDEX IF NOT EXISTS idx_task_test_status ON task_test(status);
+          CREATE INDEX IF NOT EXISTS idx_task_test_created_at ON task_test(created_at DESC);
+        `);
+        
+        console.log("[DB Init] 基础表结构创建完成");
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error("[DB Init] 基础表结构创建失败:", error);
+      throw error;
+    } finally {
+      await pool.end();
+    }
+  }
+
+  /**
    * 执行数据库迁移，确保表结构是最新的
    * @param connectionString 完整的数据库连接字符串
    */
@@ -109,6 +240,20 @@ export class DatabaseInitializer {
       const client = await pool.connect();
       
       try {
+        // 检查task_test表是否存在
+        const tableCheck = await client.query(`
+          SELECT table_name 
+          FROM information_schema.tables 
+          WHERE table_name = 'task_test' 
+            AND table_schema = 'public'
+        `);
+
+        if (tableCheck.rows.length === 0) {
+          console.log("[DB Migration] task_test表不存在，跳过字段迁移");
+          console.log("[DB Migration] 数据库迁移完成");
+          return;
+        }
+
         // 检查task_test表是否存在evaluation_result字段
         const columnCheck = await client.query(`
           SELECT column_name 

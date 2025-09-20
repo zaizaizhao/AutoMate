@@ -2,6 +2,7 @@ import { MultiAgentCoordinator } from "./AgentManager/AgentManager.js";
 import { SharedMemoryManager } from "./Memory/SharedMemoryManager.js";
 import { MemoryNamespace } from "./Memory/SharedMemoryManager.js";
 import { Pool } from "pg";
+import { DatabaseInitializer } from "./utils/DatabaseInitializer.js";
 import * as path from "path";
 import * as dotenv from "dotenv";
 
@@ -44,13 +45,40 @@ console.warn = (...args) => {
   originalConsoleWarn.apply(console, args);
 };
 
+// 数据库初始化
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL environment variable is required');
+}
+
+try {
+  console.log('[App Init] 开始数据库初始化...');
+  
+  // 确保数据库存在
+  await DatabaseInitializer.ensureDatabaseExists(databaseUrl);
+  console.log('[App Init] 数据库检查完成');
+  
+  // 创建基础表结构
+  await DatabaseInitializer.createBaseTables(databaseUrl);
+  console.log('[App Init] 基础表结构创建完成');
+  
+  // 执行数据库迁移
+  await DatabaseInitializer.migrateDatabase(databaseUrl);
+  console.log('[App Init] 数据库迁移完成');
+} catch (error) {
+  console.error('[App Init] 数据库初始化失败:', error);
+  throw error;
+}
+
 // 创建数据库连接池
 console.log(
-  `[DB] Using connection: ${sanitizeDbUrl(process.env.DATABASE_URL)}`
+  `[DB] Using connection: ${sanitizeDbUrl(databaseUrl)}`
 );
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL || "postgresql://localhost:5432/agents",
+  connectionString: databaseUrl,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 });
 
 // 初始化内存管理器

@@ -362,20 +362,56 @@ export class PlanAgent extends BaseAgent {
           }, 0);
           let seq = maxSeq + 1;
 
-          const toSave = tasksArray.map((t: any) => ({
-            batchIndex:
-              typeof t?.batchIndex === "number"
-                ? t.batchIndex
-                : typeof parsed?.batchIndex === "number"
-                  ? parsed.batchIndex
-                  : batchIndex,
-            taskId: `${safeThreadId}-${batchIndex}-${seq++}`,
-            toolName: t?.toolName ?? "",
-            description: t?.description ?? "",
-            parameters: t?.parameters ?? {},
-            complexity: t?.complexity ?? "medium",
-            isRequiredValidateByDatabase: !!t?.isRequiredValidateByDatabase,
-          }));
+          const toSave = tasksArray.map((t: any) => {
+            // 验证和处理 parameters 字段
+            let validParameters = {};
+            try {
+              const rawParams = t?.parameters;
+              if (rawParams === null || rawParams === undefined) {
+                validParameters = {};
+              } else if (typeof rawParams === 'object' && rawParams !== null) {
+                // 如果已经是对象，检查是否可以正常序列化
+                JSON.stringify(rawParams);
+                validParameters = rawParams;
+              } else if (typeof rawParams === 'string') {
+                // 如果是字符串，尝试解析为JSON
+                if (rawParams.trim() === '' || rawParams === '.' || rawParams.includes(':={}')) {
+                  // 处理已知的异常格式
+                  validParameters = {};
+                  console.warn(`[PlanAgent] Invalid parameters format detected and converted to empty object: "${rawParams}"`);
+                } else {
+                  try {
+                    validParameters = JSON.parse(rawParams);
+                  } catch (parseError) {
+                    validParameters = {};
+                    console.warn(`[PlanAgent] Failed to parse parameters as JSON, using empty object. Raw value: "${rawParams}", Error:`, parseError);
+                  }
+                }
+              } else {
+                // 其他类型直接设为空对象
+                validParameters = {};
+                console.warn(`[PlanAgent] Unexpected parameters type (${typeof rawParams}), using empty object. Raw value:`, rawParams);
+              }
+            } catch (error) {
+              validParameters = {};
+              console.warn(`[PlanAgent] Error processing parameters, using empty object. Raw value:`, t?.parameters, 'Error:', error);
+            }
+
+            return {
+              batchIndex:
+                typeof t?.batchIndex === "number"
+                  ? t.batchIndex
+                  : typeof parsed?.batchIndex === "number"
+                    ? parsed.batchIndex
+                    : batchIndex,
+              taskId: `${safeThreadId}-${batchIndex}-${seq++}`,
+              toolName: t?.toolName ?? "",
+              description: t?.description ?? "",
+              parameters: validParameters,
+              complexity: t?.complexity ?? "medium",
+              isRequiredValidateByDatabase: !!t?.isRequiredValidateByDatabase,
+            };
+          });
 
           console.log(
             `[PlanAgent] Persisting ${toSave.length} task(s) to DB. planId=${threadId}, batch=${batchIndex}`

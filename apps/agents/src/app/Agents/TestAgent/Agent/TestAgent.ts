@@ -20,10 +20,14 @@ import { formatEvaluationPrompt } from "../Prompts/EvaluatePrompt.js";
 
 export class ExecuteTestAgent extends BaseAgent {
   private llm: any;
+  private dbTools: any[];
+  private evaluateLlm: any
   // private lastThreadId: string | null = null;
 
   protected async initializellm() {
     this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
+    this.evaluateLlm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
+    this.dbTools = await getPostgresqlHubTools();
   }
 
   constructor(config: AgentConfig) {
@@ -81,8 +85,8 @@ export class ExecuteTestAgent extends BaseAgent {
       : await this.getSharedMemory(batchMemKey);
     let existingBatchState =
       existingBatchStateRaw &&
-      typeof existingBatchStateRaw === "object" &&
-      "value" in (existingBatchStateRaw as any)
+        typeof existingBatchStateRaw === "object" &&
+        "value" in (existingBatchStateRaw as any)
         ? (existingBatchStateRaw as any).value
         : existingBatchStateRaw;
     console.log(
@@ -105,8 +109,8 @@ export class ExecuteTestAgent extends BaseAgent {
       : await this.getSharedMemory(execMemKey);
     let execProgressProbe =
       execProgressProbeRaw &&
-      typeof execProgressProbeRaw === "object" &&
-      "value" in (execProgressProbeRaw as any)
+        typeof execProgressProbeRaw === "object" &&
+        "value" in (execProgressProbeRaw as any)
         ? (execProgressProbeRaw as any).value
         : execProgressProbeRaw;
     const isFirstExecution = !execProgressProbe;
@@ -186,8 +190,8 @@ export class ExecuteTestAgent extends BaseAgent {
       : await this.getSharedMemory(execMemKey);
     let execProgress =
       execProgressRaw &&
-      typeof execProgressRaw === "object" &&
-      "value" in (execProgressRaw as any)
+        typeof execProgressRaw === "object" &&
+        "value" in (execProgressRaw as any)
         ? (execProgressRaw as any).value
         : (execProgressRaw ?? undefined);
     if (!execProgress || execProgress.batchIndex !== batchIndex) {
@@ -216,7 +220,7 @@ export class ExecuteTestAgent extends BaseAgent {
       console.log(
         `[ExecuteTestNode] *** BATCH COMPLETION CHECK *** Current batch ${batchIndex} has ${tasks.length} tasks, taskIndex=${execProgress.taskIndex}. All tasks completed.`
       );
-      
+
       const nextBatch = Math.min((batchIndex ?? 0) + 1, totalBatches);
       if (existingBatchState && nextBatch !== batchIndex) {
         const newState = { ...existingBatchState, batchIndex: nextBatch };
@@ -282,7 +286,7 @@ export class ExecuteTestAgent extends BaseAgent {
     const task = tasks[execProgress.taskIndex];
     const toolName = (task as any)?.toolName || (task as any)?.tool_name;
     const isLastTaskInCurrentBatch = execProgress.taskIndex >= tasks.length - 1;
-    
+
     console.log(
       `[ExecuteTestNode] *** TASK SELECTION *** Executing task ${execProgress.taskIndex}/${tasks.length - 1} in batch ${batchIndex}. Tool: ${toolName}. IsLastTask: ${isLastTaskInCurrentBatch}`
     );
@@ -513,7 +517,7 @@ export class ExecuteTestAgent extends BaseAgent {
     );
   }
 
-  dbValidateToolNode(){
+  dbValidateToolNode() {
 
   }
 
@@ -526,7 +530,7 @@ export class ExecuteTestAgent extends BaseAgent {
     );
 
     // 确保LLM已初始化
-    if (!this.llm) {
+    if (!this.evaluateLlm) {
       console.log("[llmEvaluateNode] Initializing LLM...");
       await this.initializellm();
     }
@@ -559,8 +563,8 @@ export class ExecuteTestAgent extends BaseAgent {
       : await this.getSharedMemory(execMemKey);
     let execProgress =
       execProgressRaw &&
-      typeof execProgressRaw === "object" &&
-      "value" in (execProgressRaw as any)
+        typeof execProgressRaw === "object" &&
+        "value" in (execProgressRaw as any)
         ? (execProgressRaw as any).value
         : (execProgressRaw as any);
 
@@ -595,14 +599,19 @@ export class ExecuteTestAgent extends BaseAgent {
     const toolResult = lastToolMsg.content;
 
     try {
-      // 创建带结构化输出的LLM实例
-      const evaluationLLM = this.llm.withStructuredOutput(
-        evaluationOutputSchema,
-        {
-          name: "evaluationOutputSchema",
-          includeRaw: true,
-        }
-      );
+      // TODO: 临时注释withStructuredOutput，等待LangChain.js官方修复bug (issue #8929)
+      // const evaluationLLM = this.evaluateLlm.withStructuredOutput(
+      //   evaluationOutputSchema,
+      //   {
+      //     name: "evaluationOutputSchema",
+      //     includeRaw: true,
+      //   }
+      // );
+      
+      // 临时使用原始LLM，避免withStructuredOutput的bug
+      const evaluationLLM = this.evaluateLlm;
+      console.log("evaluationLLMAAAAAAAAAAAAAAAA",evaluationLLM);
+      
       // 获取当前批次的任务信息
       const batchIndex = execProgress?.batchIndex ?? 0;
       const tasks = await this.memoryManager.getTaskPlansByBatch(
@@ -612,12 +621,13 @@ export class ExecuteTestAgent extends BaseAgent {
       const completedIndex = execProgress?.taskIndex ?? 0;
       const completedTask = tasks[completedIndex];
       // 这里可以获取是否需要数据库验证，如果需要数据库验证，则需要使用tool
-      // const dbTools = await getPostgresqlHubTools();
-      // console.log("[llmEvaluateNode] dbTools:", dbTools);
+      console.log("[llmEvaluateNode] dbTools:", this.dbTools);
+
       // 使用正确的结构化输出方式
       // 根据LangGraph文档，应该通过structuredResponse字段访问结果
       // 构造评估提示
       const evaluationPrompt = formatEvaluationPrompt({
+        isRequiredValidateByDatabase: completedTask.isRequiredValidateByDatabase,
         toolName,
         toolParams: usedArgs,
         toolResult,
@@ -628,7 +638,7 @@ export class ExecuteTestAgent extends BaseAgent {
         },
       });
 
-      // 调用LLM进行结构化评估
+      // 直接使用LLM进行评估，避免createReactAgent的name属性问题
       const response = await evaluationLLM.invoke([
         {
           role: "system",
@@ -637,8 +647,67 @@ export class ExecuteTestAgent extends BaseAgent {
         },
         { role: "user", content: evaluationPrompt },
       ]);
-
-      const evaluationResult = response.parsed || response;
+      
+      console.log("LLM原始返回值：", response.content);
+      
+      // 手动解析JSON响应
+      let evaluationResult;
+      try {
+        // 提取JSON内容（去除可能的markdown代码块标记）
+        let jsonContent = response.content;
+        if (typeof jsonContent === 'string') {
+          // 移除可能的markdown代码块标记
+          jsonContent = jsonContent.replace(/```json\s*|```\s*/g, '').trim();
+          // 解析JSON
+          evaluationResult = JSON.parse(jsonContent);
+        } else {
+          throw new Error('响应内容不是字符串格式');
+        }
+        
+        // 验证必需字段
+        if (!evaluationResult.status || !evaluationResult.reason || !evaluationResult.confidence) {
+          throw new Error('缺少必需的字段：status, reason, confidence');
+        }
+        
+        // 验证status值
+        if (!['SUCCESS', 'FAILURE'].includes(evaluationResult.status)) {
+          throw new Error(`无效的status值: ${evaluationResult.status}`);
+        }
+        
+        // 验证confidence值
+        if (!['LOW', 'MEDIUM', 'HIGH'].includes(evaluationResult.confidence)) {
+          throw new Error(`无效的confidence值: ${evaluationResult.confidence}`);
+        }
+        
+        // 如果status是FAILURE，验证failureAnalysis字段
+        if (evaluationResult.status === 'FAILURE' && !evaluationResult.failureAnalysis) {
+          throw new Error('当status为FAILURE时，必须包含failureAnalysis字段');
+        }
+        
+        console.log('JSON解析成功，评估结果：', evaluationResult);
+        
+      } catch (parseError) {
+        console.error('JSON解析失败：', parseError);
+        console.error('原始响应内容：', response.content);
+        
+        // 提供默认的评估结果
+        evaluationResult = {
+          status: 'FAILURE',
+          reason: `LLM响应解析失败: ${parseError?.toString() || '未知错误'}`,
+          confidence: 'LOW',
+          failureAnalysis: {
+            category: 'EXECUTION_ERROR',
+            rootCause: 'LLM返回的JSON格式无效或不完整',
+            impactAssessment: '无法正确评估工具执行结果',
+            technicalDetails: `解析错误: ${parseError?.toString() || '未知错误'}}`
+          },
+          executionContext: {
+            toolName: toolName,
+            executionTime: null,
+            resourcesUsed: ['LLM评估服务']
+          }
+        };
+      }
       const isSuccess = evaluationResult.status === "SUCCESS";
       const isError = evaluationResult.status === "FAILURE";
 
@@ -796,7 +865,7 @@ export class ExecuteTestAgent extends BaseAgent {
       const currentBatchIndex = execProgress?.batchIndex ?? 0;
       const currentTaskIndex = execProgress?.taskIndex ?? 0;
       const isLastTaskInBatch = currentTaskIndex >= tasks.length - 1;
-      
+
       console.log(
         `[llmEvaluateNode] Task evaluation completed for batch ${currentBatchIndex}, task ${currentTaskIndex}/${tasks.length - 1}. IsLastTask: ${isLastTaskInBatch}`
       );
@@ -815,7 +884,7 @@ export class ExecuteTestAgent extends BaseAgent {
       console.log(
         `[llmEvaluateNode] Advanced executeProgress to taskIndex=${progressed.taskIndex}. Data storage completed for task ${completedTask?.taskId}`
       );
-      
+
       // 如果这是最后一个任务，添加额外的日志确认数据已完全存储
       if (isLastTaskInBatch) {
         const currentTestId = (execProgress as any)?.currentTestId;

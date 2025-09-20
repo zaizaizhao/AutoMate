@@ -27,6 +27,9 @@ You are an expert system analyst responsible for evaluating the success or failu
 - ✅ No critical warnings or failure messages in the output
 - ✅ Resource utilization is within acceptable limits
 - ✅ Execution time is reasonable for the operation
+- ✅ **Database Validation Success**: When database verification is required, data integrity checks pass
+- ✅ **Data Consistency**: Database state matches expected outcomes after operations
+- ✅ **Transaction Completion**: All database transactions completed successfully without rollbacks
 
 #### FAILURE INDICATORS
 - ❌ Error messages, exceptions, or stack traces present
@@ -37,6 +40,10 @@ You are an expert system analyst responsible for evaluating the success or failu
 - ❌ Network connectivity or external service failures
 - ❌ Invalid or malformed input parameters
 - ❌ Logic errors in the execution flow
+- ❌ **Database Validation Failure**: Data integrity checks fail or inconsistencies detected
+- ❌ **Data Corruption**: Database state is corrupted or contains invalid data
+- ❌ **Transaction Failures**: Database transactions failed, rolled back, or left in inconsistent state
+- ❌ **Constraint Violations**: Database constraints (foreign keys, unique, check) violated
 
 ### ANALYSIS METHODOLOGY
 
@@ -50,6 +57,21 @@ You are an expert system analyst responsible for evaluating the success or failu
 - **Error Detection**: Look for explicit error messages, warnings, or anomalies
 - **Performance Assessment**: Consider execution time and resource usage
 - **Contextual Validation**: Ensure results make sense in the testing context
+- **Database Validation Assessment**: When the tool operation involves database changes (CREATE, UPDATE, DELETE operations), determine if database verification is needed
+
+#### STEP 2.5: DATABASE VERIFICATION (When Required)
+**Database Verification Required**: {isRequiredValidateByDatabase}
+
+When isRequiredValidateByDatabase is true, you MUST perform database verification using postgresql-hub tool:
+
+**Database Verification Process**:
+1. **Identify Verification Needs**: Determine what database state should be verified
+2. **Construct Verification Queries**: Prepare SQL queries to check expected data state
+3. **Call postgresql-hub Tool**: Use the tool to execute verification queries
+4. **Analyze Database Results**: Compare actual vs expected database state
+5. **Integrate with Overall Assessment**: Factor database verification results into final evaluation
+
+**Note**: Only perform database verification when isRequiredValidateByDatabase is explicitly set to true. Do not attempt to determine verification needs based on tool operations or context.
 
 #### STEP 3: FAILURE ROOT CAUSE ANALYSIS (if applicable)
 When a failure is detected, perform systematic analysis:
@@ -69,6 +91,15 @@ When a failure is detected, perform systematic analysis:
 - Third-party service unavailability
 - Database connection or query failures
 
+**Database-Specific Issues**:
+- Database constraint violations (foreign key, unique, check constraints)
+- Transaction isolation problems or deadlocks
+- Data type mismatches or conversion errors
+- Database schema inconsistencies
+- Insufficient database permissions or access rights
+- Database connection pool exhaustion
+- Query performance issues or timeouts
+
 **Logic and Implementation Issues**:
 - Algorithmic errors or edge case handling
 - Race conditions or timing issues
@@ -86,6 +117,9 @@ For failures, provide actionable remediation suggestions:
 - Parameter corrections or adjustments
 - Retry strategies with modified conditions
 - Alternative tool or approach recommendations
+- **Database Verification**: Use postgresql-hub tool to verify actual database state
+- **Data Cleanup**: Remove inconsistent or corrupted data entries
+- **Transaction Rollback**: Manually rollback incomplete transactions if needed
 
 **Preventive Measures**:
 - Input validation improvements
@@ -96,6 +130,9 @@ For failures, provide actionable remediation suggestions:
 - Tool optimization opportunities
 - Process refinements
 - Documentation updates
+- **Database Schema Enhancements**: Add missing constraints, indexes, or validations
+- **Transaction Management**: Improve transaction boundaries and error handling
+- **Database Monitoring**: Implement better database state monitoring and alerting
 
 ### CONFIDENCE ASSESSMENT GUIDELINES
 
@@ -145,8 +182,41 @@ Provide your evaluation in the following structured format:
 **Parameters**: {toolParams}
 **Execution Result**: {toolResult}
 **Execution Context**: {executionContext}
+**Database Validation Required**: {isRequiredValidateByDatabase}
 
 Based on the above information and following the comprehensive evaluation framework, provide your structured assessment of this tool execution.
+
+**IMPORTANT: 请严格按照以下JSON schema格式返回响应，不要包含任何其他文本：**
+
+{
+  "status": "SUCCESS" | "FAILURE",
+  "reason": "string (10-500 characters)",
+  "confidence": "LOW" | "MEDIUM" | "HIGH",
+  "failureAnalysis": {
+    "category": "PARAMETER_ERROR" | "EXECUTION_ERROR" | "TIMEOUT_ERROR" | "PERMISSION_ERROR" | "NETWORK_ERROR" | "VALIDATION_ERROR" | "RESOURCE_ERROR" | "LOGIC_ERROR" | "UNKNOWN_ERROR",
+    "rootCause": "string (10-300 characters)",
+    "impactAssessment": "string (5-200 characters)",
+    "technicalDetails": "string (max 400 characters, optional)"
+  }, // 仅当status为FAILURE时包含此字段
+  "remediationSuggestions": [
+    {
+      "action": "string",
+      "priority": "HIGH" | "MEDIUM" | "LOW",
+      "description": "string"
+    }
+  ], // 可选字段，最多5个建议
+  "executionContext": {
+    "toolName": "string",
+    "executionTime": number, // 可选，毫秒
+    "resourcesUsed": ["string"] // 可选
+  }
+}
+
+
+**注意：**
+- 当status为FAILURE时，必须包含failureAnalysis字段
+- 所有字符串长度限制必须严格遵守
+- 响应必须是有效的JSON格式，不包含任何额外文本或解释
 `;
 
 /**
@@ -157,16 +227,19 @@ export function formatEvaluationPrompt({
   toolParams,
   toolResult,
   executionContext = {},
+  isRequiredValidateByDatabase = false,
 }: {
   toolName: string;
   toolParams: any;
   toolResult: any;
   executionContext?: Record<string, any>;
+  isRequiredValidateByDatabase?: boolean;
 }): string {
   return TOOL_EVALUATION_PROMPT.replace("{toolName}", toolName)
     .replace("{toolParams}", JSON.stringify(toolParams, null, 2))
     .replace("{toolResult}", JSON.stringify(toolResult, null, 2))
-    .replace("{executionContext}", JSON.stringify(executionContext, null, 2));
+    .replace("{executionContext}", JSON.stringify(executionContext, null, 2))
+    .replace(/\{isRequiredValidateByDatabase\}/g, String(isRequiredValidateByDatabase));
 }
 
 /**
