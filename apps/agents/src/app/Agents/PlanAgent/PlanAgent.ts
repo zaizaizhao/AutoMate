@@ -10,7 +10,7 @@ import { AIMessage } from "@langchain/core/messages";
 // import { ConfigurationSchema } from "../../ModelUtils/Config.js";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
-import { sqlToolPrompts, TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
+// import { sqlToolPrompts, TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
 import { getPostgresqlHubTools, getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
 
@@ -27,6 +27,362 @@ export class PlanAgent extends BaseAgent {
 
   protected async initializellm() {
     this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
+  }
+
+  /**
+   * 第一阶段：数据查询规划阶段
+   * 让LLM自由调用数据库工具，进行数据探索和分析，无格式约束
+   */
+  private async executeDataQueryStage(
+    _threadId: string,
+    batchIndex: number,
+    selectedToolMeta: any[],
+    planningContext: string
+  ): Promise<{ success: boolean; conversationHistory: any[]; realData: any }> {
+    console.log(`[PlanAgent] Starting Stage 1: Data Query & Planning for batch ${batchIndex}`);
+    
+    const stage1SystemPrompt = `You are a test planning assistant in the DATA QUERY & PLANNING stage.
+
+Your primary goal is to:
+1. EXPLORE and QUERY the database to understand available data
+2. IDENTIFY real IDs, relationships, and data patterns
+3. PLAN test scenarios based on REAL data (not mock data)
+4. Use tools freely to gather information
+
+IMPORTANT GUIDELINES:
+- ALWAYS query the database first to understand the data structure
+- Use REAL IDs from database queries, never generate mock IDs like "user123", "task456", etc.
+- Explore relationships between entities
+- Understand data constraints and validation rules
+- This stage allows natural language output - you don't need to format as JSON yet
+- Focus on data discovery and understanding
+
+Current batch tools available: ${selectedToolMeta.map(t => t.name).join(', ')}
+
+${planningContext}`;
+
+    const dataQueryAgent = await createReactAgent({
+      llm: this.llm,
+      tools: await getPostgresqlHubTools()
+    });
+
+    try {
+      const stage1Response = await dataQueryAgent.invoke({
+        messages: [
+          { role: "system", content: stage1SystemPrompt },
+          { role: "user", content: `Please explore the database and plan test tasks for the current batch of tools. Focus on understanding the real data available and identifying actual IDs and relationships that should be used in test scenarios.` }
+        ]
+      });
+
+      // 提取完整的对话历史，包括工具调用和结果
+      const conversationHistory = this.extractConversationHistory(stage1Response);
+      const realData = this.extractRealDataFromHistory(conversationHistory);
+      
+      console.log(`[PlanAgent] Stage 1 completed. Found ${Object.keys(realData).length} types of real data`);
+      
+      return {
+        success: true,
+        conversationHistory,
+        realData
+      };
+    } catch (error) {
+      console.error("[PlanAgent] Stage 1 (Data Query) failed:", error);
+      return {
+        success: false,
+        conversationHistory: [],
+        realData: {}
+      };
+    }
+  }
+
+  /**
+   * 从对话历史中提取完整的消息流，包括工具调用
+   */
+  private extractConversationHistory(response: any): any[] {
+    const history: any[] = [];
+    
+    if (response && Array.isArray(response.messages)) {
+      return response.messages;
+    }
+    
+    // 如果不是标准格式，尝试其他提取方式
+    if (response && response.content) {
+      history.push(response);
+    }
+    
+    return history;
+  }
+
+  /**
+   * 从对话历史中提取真实数据（ID、关系等）
+   */
+  private extractRealDataFromHistory(history: any[]): any {
+    const realData: any = {
+      userIds: [],
+      taskIds: [],
+      projectIds: [],
+      relationships: [],
+      constraints: []
+    };
+    
+    for (const message of history) {
+      const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+      
+      // 提取数据库查询结果中的ID模式
+      const idPatterns = {
+        userIds: /user[_-]?id["']?\s*:?\s*["']?(\d+|[a-f0-9-]{36})["']?/gi,
+        taskIds: /task[_-]?id["']?\s*:?\s*["']?(\d+|[a-f0-9-]{36})["']?/gi,
+        projectIds: /project[_-]?id["']?\s*:?\s*["']?(\d+|[a-f0-9-]{36})["']?/gi
+      };
+      
+      for (const [key, pattern] of Object.entries(idPatterns)) {
+        const matches = content.match(pattern);
+        if (matches) {
+          const ids = matches.map((match: any) => {
+            const idMatch = match.match(/["']?(\d+|[a-f0-9-]{36})["']?$/);
+            return idMatch ? idMatch[1] : null;
+          }).filter(Boolean);
+          realData[key].push(...ids);
+        }
+      }
+    }
+    
+    // 去重
+    for (const key of Object.keys(realData)) {
+      if (Array.isArray(realData[key])) {
+        realData[key] = [...new Set(realData[key])];
+      }
+    }
+    
+    return realData;
+  }
+
+  /**
+   * 第二阶段：格式化阶段
+   * 基于第一阶段的数据查询结果，生成符合outputRules的结构化JSON
+   */
+  private async executeFormattingStage(
+    _threadId: string,
+    batchIndex: number,
+    selectedToolMeta: any[],
+    conversationHistory: any[],
+    realData: any,
+    outputRules: string
+  ): Promise<{ success: boolean; parsedTasks: any }> {
+    console.log(`[PlanAgent] Starting Stage 2: Formatting for batch ${batchIndex}`);
+    
+    const stage2SystemPrompt = `You are a test planning assistant in the FORMATTING stage.
+
+Your goal is to generate a structured JSON response based on the data exploration results from Stage 1.
+
+IMPORTANT GUIDELINES:
+- Use ONLY the real data discovered in Stage 1
+- DO NOT generate new mock IDs or data
+- Follow the exact JSON format specified in OUTPUT_RULES
+- Each task must use real IDs from the database queries
+- Focus on formatting, not on new data discovery
+
+Real data available from Stage 1:
+${JSON.stringify(realData, null, 2)}
+
+Tools for this batch: ${selectedToolMeta.map(t => `${t.name}: ${t.description}`).join('\n')}
+
+${outputRules}`;
+
+    const stage1Summary = this.summarizeStage1Results(conversationHistory, realData);
+    
+    const formattingAgent = await createReactAgent({
+      llm: this.llm,
+      tools: [] // 第二阶段不提供工具，专注格式化
+    });
+
+    try {
+      const stage2Response = await formattingAgent.invoke({
+        messages: [
+          { role: "system", content: stage2SystemPrompt },
+          { role: "user", content: `Based on the Stage 1 data exploration results below, generate the required JSON format for test tasks:\n\nStage 1 Summary:\n${stage1Summary}\n\nPlease generate the JSON response following the exact format specified in OUTPUT_RULES.` }
+        ]
+      });
+
+      // 解析第二阶段的JSON响应
+      const parsed = this.parseStage2Response(stage2Response);
+      
+      if (parsed) {
+        console.log(`[PlanAgent] Stage 2 completed successfully. Generated ${parsed.tasks?.length || 0} tasks`);
+        return {
+          success: true,
+          parsedTasks: parsed
+        };
+      } else {
+        console.error("[PlanAgent] Stage 2 failed to generate valid JSON");
+        return {
+          success: false,
+          parsedTasks: null
+        };
+      }
+    } catch (error) {
+      console.error("[PlanAgent] Stage 2 (Formatting) failed:", error);
+      return {
+        success: false,
+        parsedTasks: null
+      };
+    }
+  }
+
+  /**
+   * 总结第一阶段的结果，为第二阶段提供清晰的输入
+   */
+  private summarizeStage1Results(conversationHistory: any[], realData: any): string {
+    const summary = {
+      dataExploration: "Stage 1 explored the database and gathered the following information:",
+      realDataFound: realData,
+      keyFindings: [] as string[],
+      toolCallResults: [] as any[]
+    };
+
+    // 提取工具调用结果
+    for (const message of conversationHistory) {
+      if (message.type === 'tool' || message.role === 'tool') {
+        summary.toolCallResults.push({
+          tool: message.name || 'unknown',
+          result: message.content
+        });
+      }
+    }
+
+    // 生成关键发现
+    if (realData.userIds?.length > 0) {
+      summary.keyFindings.push(`Found ${realData.userIds.length} real user IDs: ${realData.userIds.slice(0, 3).join(', ')}${realData.userIds.length > 3 ? '...' : ''}`);
+    }
+    if (realData.taskIds?.length > 0) {
+      summary.keyFindings.push(`Found ${realData.taskIds.length} real task IDs: ${realData.taskIds.slice(0, 3).join(', ')}${realData.taskIds.length > 3 ? '...' : ''}`);
+    }
+    if (realData.projectIds?.length > 0) {
+      summary.keyFindings.push(`Found ${realData.projectIds.length} real project IDs: ${realData.projectIds.slice(0, 3).join(', ')}${realData.projectIds.length > 3 ? '...' : ''}`);
+    }
+
+    return JSON.stringify(summary, null, 2);
+  }
+
+  /**
+   * 解析第二阶段的JSON响应
+   */
+  private parseStage2Response(response: any): any {
+    try {
+      // 归一化响应为消息数组
+      let msgs: any[] = [];
+      if (response && Array.isArray((response as any).messages)) {
+        msgs = (response as any).messages as any[];
+      } else if (response && (response as any).content) {
+        msgs = [response as any];
+      } else if (Array.isArray(response)) {
+        msgs = response as any[];
+      }
+
+      if (!msgs || msgs.length === 0) {
+        console.error("[PlanAgent] No response messages from formatting agent");
+        return null;
+      }
+
+      const last = msgs[msgs.length - 1] as any;
+      const rawContent = last?.content;
+
+      const extractText = (c: any): string => {
+        if (typeof c === "string") return c;
+        if (Array.isArray(c)) {
+          return c
+            .map((p: any) => {
+              if (typeof p === "string") return p;
+              if (p && typeof p === "object") {
+                if (typeof p.text === "string") return p.text;
+                if (typeof p.content === "string") return p.content;
+              }
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n")
+            .trim();
+        }
+        if (c && typeof c === "object") {
+          if (typeof (c as any).text === "string") return (c as any).text;
+        }
+        try {
+          return JSON.stringify(c);
+        } catch {
+          return "";
+        }
+      };
+
+      let text = extractText(rawContent) || "";
+      console.log("[PlanAgent] Stage 2 raw response content:", text);
+
+      // 去除markdown代码块围栏
+      text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1").trim();
+
+      // 从文本中提取首个完整且配平的 JSON
+      const extractBalancedJson = (s: string): string | null => {
+        const firstBrace = s.indexOf("{");
+        const firstBracket = s.indexOf("[");
+        const start = firstBrace === -1 ? firstBracket : firstBracket === -1 ? firstBrace : Math.min(firstBrace, firstBracket);
+        if (start === -1) return null;
+        const startChar = s[start];
+        const open = startChar === "{" ? "{" : "[";
+        const close = startChar === "{" ? "}" : "]";
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        for (let i = start; i < s.length; i++) {
+          const ch = s[i];
+          if (escape) {
+            escape = false;
+            continue;
+          }
+          if (inString) {
+            if (ch === "\\") {
+              escape = true;
+            } else if (ch === '"') {
+              inString = false;
+            }
+            continue;
+          } else {
+            if (ch === '"') {
+              inString = true;
+              continue;
+            }
+            if (ch === open) depth++;
+            else if (ch === close) {
+              depth--;
+              if (depth === 0) return s.slice(start, i + 1);
+            }
+          }
+        }
+        return null;
+      };
+
+      // 先直接解析；失败则尝试配平提取
+      try {
+        const parsed = JSON.parse(text);
+        console.log("[PlanAgent] Stage 2 successfully parsed JSON (direct)");
+        return parsed;
+      } catch {
+        const extracted = extractBalancedJson(text);
+        if (extracted) {
+          try {
+            const parsed = JSON.parse(extracted);
+            console.log("[PlanAgent] Stage 2 successfully parsed JSON (extracted)");
+            return parsed;
+          } catch (e) {
+            console.error("[PlanAgent] Stage 2 failed to parse extracted JSON:", e);
+          }
+        } else {
+          console.error("[PlanAgent] Stage 2 no JSON found in response");
+        }
+      }
+    } catch (e) {
+      console.error("[PlanAgent] Error while parsing Stage 2 response:", e);
+    }
+    
+    return null;
   }
 
   async planNode(
@@ -208,30 +564,8 @@ export class PlanAgent extends BaseAgent {
         t?.schema ?? t?.input_schema ?? t?.parametersSchema ?? undefined,
     }));
 
-    let systemPrompt = TOOL_MESSAGE_EXTRACT_PROMPT.replace(
-      "{system_time}",
-      new Date().toISOString()
-    );
-
-    // 当前批次的信息，帮助模型在输出中设置正确的 batchIndex，并仅围绕该批次工具生成任务
-    const batchInfoContext =
-      `You are generating test tasks ONLY for the current tool batch.\n` +
-      `BATCH_INFO=\n${JSON.stringify(
-        {
-          threadId,
-          batchIndex,
-          totalBatches,
-          toolsPerBatch,
-          totalTools,
-          startIndex,
-          endIndex: Math.min(endIndex, totalTools),
-          toolNames: selectedToolMeta.map((t) => t.name),
-        },
-        null,
-        2
-      )}`;
-
-    const toolsContext = `You have the following available tools for THIS BATCH (5 per call). Use the exact value in the \"name\" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\nTOOLS_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}`;
+    // Removed unused variables from old single-stage implementation
+    // systemPrompt, batchInfoContext, toolsContext are handled within the two-stage methods
 
     // —— 规划上下文摘要（从共享内存读取，不存在则从最后一条用户指令提取并持久化） ——
     const planningContextKey = `planNode:${threadId}:planningContext`;
@@ -289,7 +623,7 @@ export class PlanAgent extends BaseAgent {
           : JSON.stringify(planningContextItem, null, 2);
       planningContext = `PLANNING_CONTEXT=\n${ctx}`;
     }
-    const planningContextMsg = planningContext;
+    // planningContext is used directly in stage methods
 
     // —— 输出规则（强约束，仅允许结构化 JSON） ——
     const outputRules = [
@@ -311,142 +645,53 @@ export class PlanAgent extends BaseAgent {
       "- No code fences, no markdown, no natural language outside JSON.",
     ].join("\n");
 
-    const planReactAgent = await createReactAgent({
-      llm: this.llm,
-      tools: await getPostgresqlHubTools()
-    })
-
     try {
-      const response = await planReactAgent.invoke({
-        messages: [
-          {role:"system", content:sqlToolPrompts},
-          { role: "system", content: systemPrompt },
-          { role: "system", content: planningContextMsg },
-          { role: "system", content: batchInfoContext },
-          { role: "system", content: toolsContext },
-          { role: "system", content: outputRules },
-        ]
-      });
-
-      console.log(
-        "[PlanAgent] LLM response start:===============================================",response
+      // 第一阶段：数据查询规划阶段
+      console.log(`[PlanAgent] Starting Stage 1: Data Query Planning`);
+      const stage1Result = await this.executeDataQueryStage(
+        threadId,
+        batchIndex,
+        selectedToolMeta,
+        planningContext
       );
-      
-      // 手动解析JSON响应（兼容 createReactAgent 返回格式与多种 content 结构）
-      let parsed: any = null;
-      try {
-        // 归一化响应为消息数组
-        let msgs: any[] = [];
-        if (response && Array.isArray((response as any).messages)) {
-          msgs = (response as any).messages as any[];
-        } else if (response && (response as any).content) {
-          msgs = [response as any];
-        } else if (Array.isArray(response)) {
-          msgs = response as any[];
-        }
 
-        if (!msgs || msgs.length === 0) {
-          console.error("[PlanAgent] No response messages from agent");
-        } else {
-          const last = msgs[msgs.length - 1] as any;
-          const rawContent = last?.content;
-
-          const extractText = (c: any): string => {
-            if (typeof c === "string") return c;
-            if (Array.isArray(c)) {
-              return c
-                .map((p: any) => {
-                  if (typeof p === "string") return p;
-                  if (p && typeof p === "object") {
-                    if (typeof p.text === "string") return p.text;
-                    if (typeof p.content === "string") return p.content;
-                  }
-                  return "";
-                })
-                .filter(Boolean)
-                .join("\n")
-                .trim();
-            }
-            if (c && typeof c === "object") {
-              if (typeof (c as any).text === "string") return (c as any).text;
-            }
-            try {
-              return JSON.stringify(c);
-            } catch {
-              return "";
-            }
-          };
-
-          let text = extractText(rawContent) || "";
-          console.log("[PlanAgent] Raw response content:", text);
-
-          // 去除markdown代码块围栏
-          text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1").trim();
-
-          // 从文本中提取首个完整且配平的 JSON（支持对象或数组）
-          const extractBalancedJson = (s: string): string | null => {
-            const firstBrace = s.indexOf("{");
-            const firstBracket = s.indexOf("[");
-            const start = firstBrace === -1 ? firstBracket : firstBracket === -1 ? firstBrace : Math.min(firstBrace, firstBracket);
-            if (start === -1) return null;
-            const startChar = s[start];
-            const open = startChar === "{" ? "{" : "[";
-            const close = startChar === "{" ? "}" : "]";
-            let depth = 0;
-            let inString = false;
-            let escape = false;
-            for (let i = start; i < s.length; i++) {
-              const ch = s[i];
-              if (escape) {
-                escape = false;
-                continue;
-              }
-              if (inString) {
-                if (ch === "\\") {
-                  escape = true;
-                } else if (ch === '"') {
-                  inString = false;
-                }
-                continue;
-              } else {
-                if (ch === '"') {
-                  inString = true;
-                  continue;
-                }
-                if (ch === open) depth++;
-                else if (ch === close) {
-                  depth--;
-                  if (depth === 0) return s.slice(start, i + 1);
-                }
-              }
-            }
-            return null;
-          };
-
-          // 先直接解析；失败则尝试配平提取
-          try {
-            parsed = JSON.parse(text);
-            console.log("[PlanAgent] Successfully parsed JSON (direct)");
-          } catch {
-            const extracted = extractBalancedJson(text);
-            if (extracted) {
-              try {
-                parsed = JSON.parse(extracted);
-                console.log("[PlanAgent] Successfully parsed JSON (extracted)");
-              } catch (e) {
-                console.error("[PlanAgent] Failed to parse extracted JSON:", e);
-              }
-            } else {
-              console.error("[PlanAgent] No JSON found in response");
-            }
-          }
-        }
-      } catch (e) {
-        console.error("[PlanAgent] Error while parsing agent response:", e);
+      if (!stage1Result.success) {
+        console.error(`[PlanAgent] Stage 1 failed for batch ${batchIndex}`);
+        return {
+          messages: [
+            new AIMessage({
+              content: `第一阶段数据查询失败，批次 ${batchIndex}`,
+            }),
+          ],
+        };
       }
-      
+
+      // 第二阶段：格式化阶段
+      console.log(`[PlanAgent] Starting Stage 2: Formatting`);
+      const stage2Result = await this.executeFormattingStage(
+        threadId,
+        batchIndex,
+        selectedToolMeta,
+        stage1Result.conversationHistory,
+        stage1Result.realData,
+        outputRules
+      );
+
+      if (!stage2Result.success || !stage2Result.parsedTasks) {
+        console.error(`[PlanAgent] Stage 2 failed for batch ${batchIndex}`);
+        return {
+          messages: [
+            new AIMessage({
+              content: `第二阶段格式化失败，批次 ${batchIndex}`,
+            }),
+          ],
+        };
+      }
+
+      const parsed = stage2Result.parsedTasks;
+
       console.log(
-        "[PlanAgent] LLM response end:==============================================="
+        "[PlanAgent] Two-stage planning completed successfully"
       );
 
       if (parsed) {
@@ -569,11 +814,9 @@ export class PlanAgent extends BaseAgent {
   }
 
   routeModelOutput(
-    state: typeof MessagesAnnotation.State
+    _state: typeof MessagesAnnotation.State
   ): "plan-node" {
-    const messages = state.messages as any[];
-    const lastMessage = messages[messages.length - 1] as AIMessage | any;
-
+    // Always route to plan-node for batch processing
     return "plan-node"
   }
 
