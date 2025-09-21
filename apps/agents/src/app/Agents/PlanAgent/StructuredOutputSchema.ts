@@ -26,7 +26,14 @@ const TaskSchema = z.object({
   description: z.string().describe("任务描述"),
   parameters: TaskParameters.describe("任务参数，可以是对象或字符串格式"),
   complexity: ComplexityLevel.describe("任务复杂度级别"),
-  isRequiredValidateByDatabase: z.boolean().describe("是否需要数据库验证"),
+  isRequiredValidateByDatabase: z.boolean().describe(
+    "是否需要数据库验证。判断规则：" +
+    "1. 如果操作会修改数据库状态（CREATE、INSERT、UPDATE、DELETE、POST、PUT、PATCH等），设置为true；" +
+    "2. 如果操作结果需要通过数据库验证其正确性（如根据ID查询特定数据验证返回内容），设置为true；" +
+    "3. 如果操作涉及数据一致性检查或业务逻辑验证，设置为true；" +
+    "4. 如果是纯查询操作且不需要验证数据准确性（如获取列表、统计信息），设置为false；" +
+    "5. 根据工具描述和预期影响智能判断，重点考虑是否需要验证操作后的数据库状态"
+  ),
 });
 
 // 计划输出的完整schema

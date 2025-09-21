@@ -10,10 +10,11 @@ import { AIMessage } from "@langchain/core/messages";
 // import { ConfigurationSchema } from "../../ModelUtils/Config.js";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
-import { TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
-import { getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
+import { sqlToolPrompts, TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
+import { getPostgresqlHubTools, getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
-import { planOutputSchema } from "./StructuredOutputSchema.js";
+
+import { createReactAgent } from "@langchain/langgraph/prebuilt";
 
 export class PlanAgent extends BaseAgent {
   private llm: any;
@@ -85,8 +86,8 @@ export class PlanAgent extends BaseAgent {
       : await this.getSharedMemory(batchMemKey);
     const existingBatchState =
       existingBatchStateRaw &&
-      typeof existingBatchStateRaw === "object" &&
-      "value" in (existingBatchStateRaw as any)
+        typeof existingBatchStateRaw === "object" &&
+        "value" in (existingBatchStateRaw as any)
         ? (existingBatchStateRaw as any).value
         : existingBatchStateRaw;
     console.log(
@@ -169,17 +170,17 @@ export class PlanAgent extends BaseAgent {
         });
         try {
           console.log(store);
-          
+
           await store.put(ns, "toolBatch", payload);
-          console.log("[PlanAgent] store.put completed successfully",payload);
-          
+          console.log("[PlanAgent] store.put completed successfully", payload);
+
           // 尝试强制刷新AsyncBatchedStore
           if (store.store && typeof store.store.put === "function") {
             console.log("[PlanAgent] Attempting direct call to underlying store.put");
             await store.store.put(ns, "toolBatch_direct", payload);
             console.log("[PlanAgent] Direct store.put completed");
           }
-          
+
           // 使用put方法替代batch方法避免AsyncBatchedStore问题
           if (store && typeof store.put === "function") {
             console.log("[PlanAgent] Using put method instead of batch to avoid AsyncBatchedStore issue");
@@ -293,50 +294,163 @@ export class PlanAgent extends BaseAgent {
     // —— 输出规则（强约束，仅允许结构化 JSON） ——
     const outputRules = [
       "OUTPUT_RULES:",
-      "- You MUST return only a JSON object matching planOutputSchema.",
-      "- No code fences, no markdown, no natural language outside JSON.",
+      "- You MUST return only a JSON object with the following structure:",
+      "- Root object must have: batchIndex (number), tasks (array)",
+      "- Each task object must have:",
+      "  * batchIndex: number (must equal root batchIndex)",
+      "  * taskId: string (1-64 chars, only letters/numbers/underscore/dot/colon/dash)",
+      "  * toolName: string (exact tool name from tools list)",
+      "  * description: string (task description)",
+      "  * parameters: object or string (tool parameters)",
+      "  * complexity: 'low' | 'medium' | 'high'",
+      "  * isRequiredValidateByDatabase: boolean (true for operations that modify DB or need validation)",
+      "- All taskIds within same batch must be unique",
+      "- Each task's batchIndex must equal the root batchIndex",
       "- Tasks must ONLY use tools in this batch; use exact tool name from tools list.",
       "- Parameters must conform to the tool inputSchema.",
-      "- Set top-level batchIndex correctly and include batchIndex for each task.",
+      "- No code fences, no markdown, no natural language outside JSON.",
     ].join("\n");
 
-    const planning = (
-      await loadChatModel("openai/moonshotai/Kimi-K2-Instruct")
-    ).withStructuredOutput(planOutputSchema, {
-      name: "planOutputSchema",
-      includeRaw: true,
-    });
+    const planReactAgent = await createReactAgent({
+      llm: this.llm,
+      tools: await getPostgresqlHubTools()
+    })
 
     try {
-      const response = await planning.invoke([
-        { role: "system", content: systemPrompt },
-        { role: "system", content: planningContextMsg },
-        { role: "system", content: batchInfoContext },
-        { role: "system", content: toolsContext },
-        { role: "system", content: outputRules },
-      ]);
+      const response = await planReactAgent.invoke({
+        messages: [
+          {role:"system", content:sqlToolPrompts},
+          { role: "system", content: systemPrompt },
+          { role: "system", content: planningContextMsg },
+          { role: "system", content: batchInfoContext },
+          { role: "system", content: toolsContext },
+          { role: "system", content: outputRules },
+        ]
+      });
 
       console.log(
-        "[PlanAgent] LLM response start:==============================================="
+        "[PlanAgent] LLM response start:===============================================",response
       );
-      if (response && typeof response === "object" && "parsed" in response) {
-        console.log(
-          "[PlanAgent] Parsed structured output:",
-          (response as any).parsed
-        );
-        // 可选：打印原始消息，便于排查模型是否仍返回markdown
-        if ((response as any).raw) {
-          console.log(
-            "[PlanAgent] Raw message content:",
-            (response as any).raw.content
-          );
+      
+      // 手动解析JSON响应（兼容 createReactAgent 返回格式与多种 content 结构）
+      let parsed: any = null;
+      try {
+        // 归一化响应为消息数组
+        let msgs: any[] = [];
+        if (response && Array.isArray((response as any).messages)) {
+          msgs = (response as any).messages as any[];
+        } else if (response && (response as any).content) {
+          msgs = [response as any];
+        } else if (Array.isArray(response)) {
+          msgs = response as any[];
         }
-        console.log(
-          "[PlanAgent] LLM response end:==============================================="
-        );
 
+        if (!msgs || msgs.length === 0) {
+          console.error("[PlanAgent] No response messages from agent");
+        } else {
+          const last = msgs[msgs.length - 1] as any;
+          const rawContent = last?.content;
+
+          const extractText = (c: any): string => {
+            if (typeof c === "string") return c;
+            if (Array.isArray(c)) {
+              return c
+                .map((p: any) => {
+                  if (typeof p === "string") return p;
+                  if (p && typeof p === "object") {
+                    if (typeof p.text === "string") return p.text;
+                    if (typeof p.content === "string") return p.content;
+                  }
+                  return "";
+                })
+                .filter(Boolean)
+                .join("\n")
+                .trim();
+            }
+            if (c && typeof c === "object") {
+              if (typeof (c as any).text === "string") return (c as any).text;
+            }
+            try {
+              return JSON.stringify(c);
+            } catch {
+              return "";
+            }
+          };
+
+          let text = extractText(rawContent) || "";
+          console.log("[PlanAgent] Raw response content:", text);
+
+          // 去除markdown代码块围栏
+          text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1").trim();
+
+          // 从文本中提取首个完整且配平的 JSON（支持对象或数组）
+          const extractBalancedJson = (s: string): string | null => {
+            const firstBrace = s.indexOf("{");
+            const firstBracket = s.indexOf("[");
+            const start = firstBrace === -1 ? firstBracket : firstBracket === -1 ? firstBrace : Math.min(firstBrace, firstBracket);
+            if (start === -1) return null;
+            const startChar = s[start];
+            const open = startChar === "{" ? "{" : "[";
+            const close = startChar === "{" ? "}" : "]";
+            let depth = 0;
+            let inString = false;
+            let escape = false;
+            for (let i = start; i < s.length; i++) {
+              const ch = s[i];
+              if (escape) {
+                escape = false;
+                continue;
+              }
+              if (inString) {
+                if (ch === "\\") {
+                  escape = true;
+                } else if (ch === '"') {
+                  inString = false;
+                }
+                continue;
+              } else {
+                if (ch === '"') {
+                  inString = true;
+                  continue;
+                }
+                if (ch === open) depth++;
+                else if (ch === close) {
+                  depth--;
+                  if (depth === 0) return s.slice(start, i + 1);
+                }
+              }
+            }
+            return null;
+          };
+
+          // 先直接解析；失败则尝试配平提取
+          try {
+            parsed = JSON.parse(text);
+            console.log("[PlanAgent] Successfully parsed JSON (direct)");
+          } catch {
+            const extracted = extractBalancedJson(text);
+            if (extracted) {
+              try {
+                parsed = JSON.parse(extracted);
+                console.log("[PlanAgent] Successfully parsed JSON (extracted)");
+              } catch (e) {
+                console.error("[PlanAgent] Failed to parse extracted JSON:", e);
+              }
+            } else {
+              console.error("[PlanAgent] No JSON found in response");
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[PlanAgent] Error while parsing agent response:", e);
+      }
+      
+      console.log(
+        "[PlanAgent] LLM response end:==============================================="
+      );
+
+      if (parsed) {
         // —— 持久化当前批次的规划结果到 task_plans ——
-        const parsed: any = (response as any).parsed;
         const tasksArray: any[] = Array.isArray(parsed?.tasks)
           ? parsed.tasks
           : [];
@@ -453,8 +567,15 @@ export class PlanAgent extends BaseAgent {
 
     return { messages: [new AIMessage({ content: "计划生成完成（本批次）" })] };
   }
-  // agent执行终端机制
-  startOrContinuePlan() {}
+
+  routeModelOutput(
+    state: typeof MessagesAnnotation.State
+  ): "plan-node" {
+    const messages = state.messages as any[];
+    const lastMessage = messages[messages.length - 1] as AIMessage | any;
+
+    return "plan-node"
+  }
 
   async getBatchTasks(
     planId: string,
@@ -517,20 +638,20 @@ export class PlanAgent extends BaseAgent {
         : await this.getSharedMemory(batchMemKey);
       const batchState =
         batchStateRaw &&
-        typeof batchStateRaw === "object" &&
-        "value" in (batchStateRaw as any)
+          typeof batchStateRaw === "object" &&
+          "value" in (batchStateRaw as any)
           ? ((batchStateRaw as any).value as {
-              batchIndex: number;
-              toolsPerBatch: number;
-              totalTools: number;
-              totalBatches: number;
-            } | null)
+            batchIndex: number;
+            toolsPerBatch: number;
+            totalTools: number;
+            totalBatches: number;
+          } | null)
           : (batchStateRaw as {
-              batchIndex: number;
-              toolsPerBatch: number;
-              totalTools: number;
-              totalBatches: number;
-            } | null);
+            batchIndex: number;
+            toolsPerBatch: number;
+            totalTools: number;
+            totalBatches: number;
+          } | null);
       console.log(
         "[PlanAgent] Router read batchState (normalized):",
         batchState

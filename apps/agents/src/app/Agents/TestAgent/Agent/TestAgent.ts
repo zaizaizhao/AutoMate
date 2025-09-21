@@ -1,4 +1,4 @@
-import { AIMessage, BaseMessage } from "@langchain/core/messages";
+import { AIMessage } from "@langchain/core/messages";
 import {
   END,
   LangGraphRunnableConfig,
@@ -6,7 +6,7 @@ import {
   START,
   StateGraph,
 } from "@langchain/langgraph";
-import { createReactAgent, ToolNode } from "@langchain/langgraph/prebuilt";
+import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AgentConfig, BaseAgent } from "../../../BaseAgent/BaseAgent.js";
 import { getPostgresqlHubTools, getTestServerTools } from "../../../mcp-servers/mcp-client.js";
 import { loadChatModel } from "../../../ModelUtils/ChatModel.js";
@@ -38,18 +38,13 @@ export class ExecuteTestAgent extends BaseAgent {
     _state: typeof MessagesAnnotation.State,
     config: LangGraphRunnableConfig
   ) {
-    console.log(
-      "[ExcuteTestNode] config thread_id:",
-      config?.configurable?.thread_id
-    );
-
     // 确保LLM已初始化
     if (!this.llm) {
       console.log("[ExcuteTestNode] Initializing LLM...");
       await this.initializellm();
     }
     const tools = await getTestServerTools();
-    const toolCallingModel = this.llm.bindTools(tools);
+    const toolCallingModel = this.llm.bindTools([...tools]);
 
     const threadId = (config?.configurable as any)?.thread_id ?? "default";
     // Prefer runtime store unless it's the CLI-injected InMemory AsyncBatchedStore, or env forces shared memory
@@ -384,10 +379,8 @@ export class ExecuteTestAgent extends BaseAgent {
         );
       }
     }
-
     // 注意：不在此处预推进任务指针，避免一次工具执行推进两次。
     // 指针在下一轮（持久化工具结果后）再前移。
-
     // 构造对 LLM 的指令，让其调用指定工具并生成/补全参数（需满足工具 schema）
     const userMsg = buildToolInvocationUserPrompt({
       taskId: (task as any)?.taskId,
@@ -400,7 +393,6 @@ export class ExecuteTestAgent extends BaseAgent {
       { role: "system", content: buildSystemPrompt() },
       { role: "user", content: userMsg },
     ]);
-
     return { messages: [response] };
   }
 
@@ -409,7 +401,6 @@ export class ExecuteTestAgent extends BaseAgent {
     config: LangGraphRunnableConfig
   ) {
     const tools = await getTestServerTools();
-
     // 处理DeepSeek-V3模型产生的格式问题
     const messages = [...state.messages] as any[];
     const lastMessage = messages[messages.length - 1] as AIMessage | any;
@@ -517,9 +508,6 @@ export class ExecuteTestAgent extends BaseAgent {
     );
   }
 
-  dbValidateToolNode() {
-
-  }
 
   async llmEvaluateNode(
     state: typeof MessagesAnnotation.State,
@@ -607,11 +595,9 @@ export class ExecuteTestAgent extends BaseAgent {
       //     includeRaw: true,
       //   }
       // );
-      
+
       // 临时使用原始LLM，避免withStructuredOutput的bug
       const evaluationLLM = this.evaluateLlm;
-      console.log("evaluationLLMAAAAAAAAAAAAAAAA",evaluationLLM);
-      
       // 获取当前批次的任务信息
       const batchIndex = execProgress?.batchIndex ?? 0;
       const tasks = await this.memoryManager.getTaskPlansByBatch(
@@ -647,9 +633,9 @@ export class ExecuteTestAgent extends BaseAgent {
         },
         { role: "user", content: evaluationPrompt },
       ]);
-      
+
       console.log("LLM原始返回值：", response.content);
-      
+
       // 手动解析JSON响应
       let evaluationResult;
       try {
@@ -663,33 +649,33 @@ export class ExecuteTestAgent extends BaseAgent {
         } else {
           throw new Error('响应内容不是字符串格式');
         }
-        
+
         // 验证必需字段
         if (!evaluationResult.status || !evaluationResult.reason || !evaluationResult.confidence) {
           throw new Error('缺少必需的字段：status, reason, confidence');
         }
-        
+
         // 验证status值
         if (!['SUCCESS', 'FAILURE'].includes(evaluationResult.status)) {
           throw new Error(`无效的status值: ${evaluationResult.status}`);
         }
-        
+
         // 验证confidence值
         if (!['LOW', 'MEDIUM', 'HIGH'].includes(evaluationResult.confidence)) {
           throw new Error(`无效的confidence值: ${evaluationResult.confidence}`);
         }
-        
+
         // 如果status是FAILURE，验证failureAnalysis字段
         if (evaluationResult.status === 'FAILURE' && !evaluationResult.failureAnalysis) {
           throw new Error('当status为FAILURE时，必须包含failureAnalysis字段');
         }
-        
+
         console.log('JSON解析成功，评估结果：', evaluationResult);
-        
+
       } catch (parseError) {
         console.error('JSON解析失败：', parseError);
         console.error('原始响应内容：', response.content);
-        
+
         // 提供默认的评估结果
         evaluationResult = {
           status: 'FAILURE',
