@@ -10,7 +10,7 @@ import { AIMessage } from "@langchain/core/messages";
 // import { ConfigurationSchema } from "../../ModelUtils/Config.js";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
-import { sqlToolPrompts, TOOL_MESSAGE_EXTRACT_PROMPT } from "./Prompts.js";
+import { buildUnifiedPlanPrompts, sqlToolPrompts } from "./Prompts.js";
 import { getPostgresqlHubTools, getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
 
@@ -33,19 +33,13 @@ export class PlanAgent extends BaseAgent {
     state: typeof MessagesAnnotation.State,
     config: LangGraphRunnableConfig
   ) {
-    //通过state.messages来获取传入的消息
-    // 多轮planNode的调用 thread_id保持不变
-    console.log(
-      "[PlanAgent] config thread_id:",
-      config?.configurable?.thread_id
-    );
-
     // 确保LLM已初始化
     if (!this.llm) {
       console.log("[PlanAgent] Initializing LLM...");
       await this.initializellm();
     }
     // 规划阶段需要了解可用工具，但不实际调用工具：以上下文形式提供工具清单与入参模式
+    // todo: 提取到构造阶段
     const tools = await getTestServerTools();
 
     // === 每轮仅注入 5 个工具（与用户输入无关，顺序遍历） ===
@@ -79,7 +73,7 @@ export class PlanAgent extends BaseAgent {
       this.config.namespace.agent_type,
       threadId,
     ];
-
+    // todo: store是一坨屎，需要抽出去
     // 读取/初始化批次状态（优先使用 store，其次回退到 SharedMemoryManager），并规范化 store.get 返回的记录格式
     const existingBatchStateRaw = usingStore
       ? await store.get(ns, "toolBatch")
@@ -106,7 +100,7 @@ export class PlanAgent extends BaseAgent {
     );
     // 计算当前批次应注入的工具子集
     const selectedTools = tools.slice(startIndex, endIndex);
-
+    // todo: 如果没有必要，删除
     // 如果当前批次已经存在任务，跳过LLM规划，直接推进到下一批（幂等保障）
     try {
       const existingTasksForBatch = await this.getBatchTasks(
@@ -208,30 +202,7 @@ export class PlanAgent extends BaseAgent {
         t?.schema ?? t?.input_schema ?? t?.parametersSchema ?? undefined,
     }));
 
-    let systemPrompt = TOOL_MESSAGE_EXTRACT_PROMPT.replace(
-      "{system_time}",
-      new Date().toISOString()
-    );
 
-    // 当前批次的信息，帮助模型在输出中设置正确的 batchIndex，并仅围绕该批次工具生成任务
-    const batchInfoContext =
-      `You are generating test tasks ONLY for the current tool batch.\n` +
-      `BATCH_INFO=\n${JSON.stringify(
-        {
-          threadId,
-          batchIndex,
-          totalBatches,
-          toolsPerBatch,
-          totalTools,
-          startIndex,
-          endIndex: Math.min(endIndex, totalTools),
-          toolNames: selectedToolMeta.map((t) => t.name),
-        },
-        null,
-        2
-      )}`;
-
-    const toolsContext = `You have the following available tools for THIS BATCH (5 per call). Use the exact value in the \"name\" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\nTOOLS_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}`;
 
     // —— 规划上下文摘要（从共享内存读取，不存在则从最后一条用户指令提取并持久化） ——
     const planningContextKey = `planNode:${threadId}:planningContext`;
@@ -289,27 +260,7 @@ export class PlanAgent extends BaseAgent {
           : JSON.stringify(planningContextItem, null, 2);
       planningContext = `PLANNING_CONTEXT=\n${ctx}`;
     }
-    const planningContextMsg = planningContext;
-
-    // —— 输出规则（强约束，仅允许结构化 JSON） ——
-    const outputRules = [
-      "OUTPUT_RULES:",
-      "- You MUST return only a JSON object with the following structure:",
-      "- Root object must have: batchIndex (number), tasks (array)",
-      "- Each task object must have:",
-      "  * batchIndex: number (must equal root batchIndex)",
-      "  * taskId: string (1-64 chars, only letters/numbers/underscore/dot/colon/dash)",
-      "  * toolName: string (exact tool name from tools list)",
-      "  * description: string (task description)",
-      "  * parameters: object or string (tool parameters)",
-      "  * complexity: 'low' | 'medium' | 'high'",
-      "  * isRequiredValidateByDatabase: boolean (true for operations that modify DB or need validation)",
-      "- All taskIds within same batch must be unique",
-      "- Each task's batchIndex must equal the root batchIndex",
-      "- Tasks must ONLY use tools in this batch; use exact tool name from tools list.",
-      "- Parameters must conform to the tool inputSchema.",
-      "- No code fences, no markdown, no natural language outside JSON.",
-    ].join("\n");
+    
 
     const planReactAgent = await createReactAgent({
       llm: this.llm,
@@ -317,14 +268,33 @@ export class PlanAgent extends BaseAgent {
     })
 
     try {
+      const promptParts = buildUnifiedPlanPrompts({
+        threadId,
+        batchIndex,
+        totalBatches,
+        toolsPerBatch,
+        totalTools,
+        startIndex,
+        endIndex,
+        selectedToolMeta,
+        planningContext
+      });
+
+      const unifiedPrompts = [
+        promptParts.systemPrompt,
+        promptParts.batchInfoContext,
+        promptParts.toolsContext,
+        promptParts.planningContextMsg,
+        promptParts.outputRules
+      ].join('\n\n');
+      console.log("[PlanAgent] unifiedPrompts:", unifiedPrompts);
+      
+
       const response = await planReactAgent.invoke({
         messages: [
-          {role:"system", content:sqlToolPrompts},
-          { role: "system", content: systemPrompt },
-          { role: "system", content: planningContextMsg },
-          { role: "system", content: batchInfoContext },
-          { role: "system", content: toolsContext },
-          { role: "system", content: outputRules },
+          { role: "system", content: unifiedPrompts },
+          { role: "system", content: sqlToolPrompts },
+          { role: "user", content: "Generate test tasks for the current batch of tools. Use sqlTools if needed." }
         ]
       });
 
@@ -569,11 +539,8 @@ export class PlanAgent extends BaseAgent {
   }
 
   routeModelOutput(
-    state: typeof MessagesAnnotation.State
+    _state: typeof MessagesAnnotation.State
   ): "plan-node" {
-    const messages = state.messages as any[];
-    const lastMessage = messages[messages.length - 1] as AIMessage | any;
-
     return "plan-node"
   }
 

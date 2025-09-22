@@ -14,7 +14,7 @@ import {
   buildSystemPrompt,
   buildToolInvocationUserPrompt,
 } from "../Prompts/Prompts.js";
-import { evaluationOutputSchema } from "../OutPutStructure/StructuredOutPutSchema.js";
+
 import { formatEvaluationPrompt } from "../Prompts/EvaluatePrompt.js";
 
 

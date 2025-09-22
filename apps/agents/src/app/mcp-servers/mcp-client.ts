@@ -23,22 +23,22 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
         : ["./src/mcp-servers/json-writer-server.ts"],
       transport: (process.env.MCP_JSON_WRITER_TRANSPORT as "http" | "stdio") || "stdio",
     },
-    // "postgresql-hub": {
-    //   command: process.env.NODE_ENV === 'production'
-    //     ? "dbhub" // 生产环境使用全局安装
-    //     : "./node_modules/.bin/dbhub", // 开发环境使用本,
-    //   args: [
-    //     "--transport",
-    //     "stdio",
-    //     "--dsn",
-    //     process.env.TEST_DATABASE_URL ?? "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
-    //   ],
-    //   transport: "stdio",
-    // }
     "postgresql-hub": {
-      url: "http://localhost:8083/message",
-      transport: "http",
+      command: process.env.NODE_ENV === 'production'
+        ? "dbhub" // 生产环境使用全局安装
+        : "./node_modules/.bin/dbhub", // 开发环境使用本,
+      args: [
+        "--transport",
+        "stdio",
+        "--dsn",
+        process.env.TEST_DATABASE_URL ?? "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
+      ],
+      transport: "stdio",
     }
+    // "postgresql-hub": {
+    //   url: "http://localhost:8083/message",
+    //   transport: "http",
+    // }
   };
 }
 

@@ -1,7 +1,7 @@
 // agents/MultiAgentCoordinator.ts
 // import { SharedMemoryManager, MemoryNamespace } from '../memory/SharedMemoryManager';
 // import { ResearchAgent, AnalysisAgent, SummaryAgent } from './CollaborativeAgents';
-import { HumanMessage } from "@langchain/core/messages";
+
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import {
   ConfigurableChatModelCallOptions,
@@ -33,7 +33,7 @@ export interface CoordinatorConfig {
 export class MultiAgentCoordinator {
   private memoryManager: SharedMemoryManager;
   private namespace: MemoryNamespace;
-  private agents: Map<string, any> = new Map();
+
 
   constructor(memoryManager: SharedMemoryManager, namespace: MemoryNamespace) {
     this.memoryManager = memoryManager;
@@ -138,24 +138,5 @@ export class MultiAgentCoordinator {
   //   }
   // }
 
-  // 等待记忆更新
-  private async waitForMemoryUpdate(
-    key: string,
-    maxWaitTime: number = 30000
-  ): Promise<void> {
-    const startTime = Date.now();
 
-    while (Date.now() - startTime < maxWaitTime) {
-      const memory = await this.memoryManager.getSharedMemory(
-        this.namespace,
-        key
-      );
-      if (memory) {
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    throw new Error(`等待记忆更新超时: ${key}`);
-  }
 }
