@@ -10,7 +10,7 @@ import { AIMessage } from "@langchain/core/messages";
 // import { ConfigurationSchema } from "../../ModelUtils/Config.js";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
-import { buildUnifiedPlanPrompts, sqlToolPrompts } from "./Prompts.js";
+import { buildUnifiedPlanPrompts, getSqlToolPrompts } from "./Prompts.js";
 import { getPostgresqlHubTools, getTestServerTools } from "src/app/mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
 
@@ -290,11 +290,14 @@ export class PlanAgent extends BaseAgent {
       console.log("[PlanAgent] unifiedPrompts:", unifiedPrompts);
       
 
+      // 动态获取SQL工具提示词，包含MCP信息
+      const dynamicSqlToolPrompts = await getSqlToolPrompts();
+      
       const response = await planReactAgent.invoke({
         messages: [
           { role: "system", content: unifiedPrompts },
-          { role: "system", content: sqlToolPrompts },
-          { role: "user", content: "Generate test tasks for the current batch of tools. IMPORTANT: You MUST use SQL tools to query the actual database schema and existing data before generating any test parameters. For any ID fields, query the database to get real UUID values - do not generate fake IDs. Always execute database queries first to understand the table structure and retrieve actual data for realistic test parameters." }
+          { role: "system", content: dynamicSqlToolPrompts },
+          { role: "user", content: "Generate test tasks for the current batch of tools. CRITICAL WORKFLOW: 1) FIRST PHASE: You MUST call the postgresql-hub MCP tool to query the actual database schema and retrieve real data. Execute SQL queries to get table structures, existing IDs, and sample data. 2) SECOND PHASE: After gathering real database data, generate the JSON response with test tasks using the actual data you retrieved. FORBIDDEN: Do not use template strings, placeholders, or mock data. REQUIRED: All parameters must contain real values obtained from your MCP tool calls." }
         ]
       });
 
