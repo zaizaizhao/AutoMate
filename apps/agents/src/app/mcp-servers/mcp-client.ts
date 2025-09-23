@@ -23,22 +23,22 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
         : ["./src/mcp-servers/json-writer-server.ts"],
       transport: (process.env.MCP_JSON_WRITER_TRANSPORT as "http" | "stdio") || "stdio",
     },
-    "postgresql-hub": {
-      command: process.env.NODE_ENV === 'production'
-        ? "dbhub" // 生产环境使用全局安装
-        : "./node_modules/.bin/dbhub", // 开发环境使用本,
-      args: [
-        "--transport",
-        "stdio",
-        "--dsn",
-        process.env.TEST_DATABASE_URL ?? "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
-      ],
-      transport: "stdio",
-    }
     // "postgresql-hub": {
-    //   url: "http://localhost:8083/message",
-    //   transport: "http",
+    //   command: process.env.NODE_ENV === 'production'
+    //     ? "dbhub" // 生产环境使用全局安装
+    //     : "./node_modules/.bin/dbhub", // 开发环境使用本,
+    //   args: [
+    //     "--transport",
+    //     "stdio",
+    //     "--dsn",
+    //     process.env.TEST_DATABASE_URL ?? "postgres://postgres:111111@localhost:5432/agents?sslmode=disable"
+    //   ],
+    //   transport: "stdio",
     // }
+    "postgresql-hub": {
+      url: "http://localhost:8083/message",
+      transport: "http",
+    }
   };
 }
 
@@ -91,6 +91,86 @@ export class MCPClientManager {
   }
 
   /**
+   * 获取指定MCP服务器的资源列表
+   */
+  async getResources(serverNames: string[]): Promise<any[]> {
+    try {
+      const allResources: any[] = [];
+      for (const serverName of serverNames) {
+        const multiClient = this.getClient([serverName]);
+        const client = await multiClient.getClient(serverName);
+        if (client) {
+          const result = await client.listResources();
+          allResources.push(...(result.resources || []));
+        }
+      }
+      return allResources;
+    } catch (error) {
+      console.error(`Error getting resources from ${serverNames.join(', ')}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * 读取指定资源内容
+   */
+  async readResource(serverNames: string[], uri: string): Promise<any> {
+    try {
+      for (const serverName of serverNames) {
+        const multiClient = this.getClient([serverName]);
+        const client = await multiClient.getClient(serverName);
+        if (client) {
+          return await client.readResource({ uri });
+        }
+      }
+      throw new Error(`No available client found for servers: ${serverNames.join(', ')}`);
+    } catch (error) {
+      console.error(`Error reading resource ${uri} from ${serverNames.join(', ')}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取指定MCP服务器的提示模板列表
+   */
+  async getPrompts(serverNames: string[]): Promise<any[]> {
+    try {
+      const allPrompts: any[] = [];
+      for (const serverName of serverNames) {
+        const multiClient = this.getClient([serverName]);
+        const client = await multiClient.getClient(serverName);
+        if (client) {
+          const result = await client.listPrompts();
+          allPrompts.push(...(result.prompts || []));
+        }
+      }
+      return allPrompts;
+    } catch (error) {
+      console.error(`Error getting prompts from ${serverNames.join(', ')}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * 获取指定提示模板
+   */
+  async getPrompt(serverNames: string[], name: string, args?: Record<string, any>): Promise<any> {
+    try {
+      for (const serverName of serverNames) {
+        const multiClient = this.getClient([serverName]);
+        const client = await multiClient.getClient(serverName);
+        if (client) {
+          return await client.getPrompt({ name, arguments: args });
+        }
+      }
+      throw new Error(`No available client found for servers: ${serverNames.join(', ')}`);
+    } catch (error) {
+      console.error(`Error getting prompt ${name} from ${serverNames.join(', ')}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * 获取单个MCP服务器的工具
    */
   async getToolsFromServer(serverName: string): Promise<any[]> {
@@ -134,6 +214,22 @@ export async function getTestServerTools(): Promise<any[]> {
 // 专门为postgresql-hub agent提供的工具获取函数
 export async function getPostgresqlHubTools(): Promise<any[]> {
   return await mcpClientManager.getToolsFromServer("postgresql-hub");
+}
+
+export async function getPostgresqlHubResources(): Promise<any[]> {
+  return await mcpClientManager.getResources(["postgresql-hub"]);
+}
+
+export async function getPostgresqlHubResourceContent(uri: string): Promise<any> {
+  return await mcpClientManager.readResource(["postgresql-hub"], uri);
+}
+
+export async function getPostgresqlHubPrompts(): Promise<any[]> {
+  return await mcpClientManager.getPrompts(["postgresql-hub"]);
+}
+
+export async function getPostgresqlHubPrompt(name: string, args?: Record<string, any>): Promise<any> {
+  return await mcpClientManager.getPrompt(["postgresql-hub"], name, args);
 }
 
 // 专门为json-writer agent提供的工具获取函数

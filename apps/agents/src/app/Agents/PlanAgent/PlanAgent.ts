@@ -26,7 +26,7 @@ export class PlanAgent extends BaseAgent {
   }
 
   protected async initializellm() {
-    this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
+    this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
   }
 
   async planNode(
@@ -294,7 +294,7 @@ export class PlanAgent extends BaseAgent {
         messages: [
           { role: "system", content: unifiedPrompts },
           { role: "system", content: sqlToolPrompts },
-          { role: "user", content: "Generate test tasks for the current batch of tools. Use sqlTools if needed." }
+          { role: "user", content: "Generate test tasks for the current batch of tools. IMPORTANT: You MUST use SQL tools to query the actual database schema and existing data before generating any test parameters. For any ID fields, query the database to get real UUID values - do not generate fake IDs. Always execute database queries first to understand the table structure and retrieve actual data for realistic test parameters." }
         ]
       });
 
