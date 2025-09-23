@@ -673,8 +673,7 @@ export class ExecuteTestAgent extends BaseAgent {
         console.log('JSON解析成功，评估结果：', evaluationResult);
 
       } catch (parseError) {
-        console.error('JSON解析失败：', parseError);
-        console.error('原始响应内容：', response.content);
+        console.error('JSON解析失败原始响应内容：', response.content);
 
         // 提供默认的评估结果
         evaluationResult = {
@@ -697,12 +696,6 @@ export class ExecuteTestAgent extends BaseAgent {
       const isSuccess = evaluationResult.status === "SUCCESS";
       const isError = evaluationResult.status === "FAILURE";
 
-      console.log(`[llmEvaluateNode] LLM evaluation result:`, {
-        status: evaluationResult.status,
-        reason: evaluationResult.reason,
-        confidence: evaluationResult.confidence,
-        failureAnalysis: evaluationResult.failureAnalysis,
-      });
       // 更新测试结果到task_test表
       if (completedTask?.taskId) {
         try {
@@ -782,9 +775,6 @@ export class ExecuteTestAgent extends BaseAgent {
             };
 
             await this.memoryManager.saveTaskTest(testResult);
-            console.log(
-              `[llmEvaluateNode] Created new test result with structured evaluation: ${testResult.testId}`
-            );
           }
 
           // 处理多条测试数据的情况（如果工具返回多个结果）
@@ -867,16 +857,10 @@ export class ExecuteTestAgent extends BaseAgent {
       } else {
         await this.saveSharedMemory(execMemKey, progressed);
       }
-      console.log(
-        `[llmEvaluateNode] Advanced executeProgress to taskIndex=${progressed.taskIndex}. Data storage completed for task ${completedTask?.taskId}`
-      );
 
       // 如果这是最后一个任务，添加额外的日志确认数据已完全存储
       if (isLastTaskInBatch) {
         const currentTestId = (execProgress as any)?.currentTestId;
-        console.log(
-          `[llmEvaluateNode] *** LAST TASK COMPLETED *** Batch ${currentBatchIndex} task ${currentTaskIndex} evaluation and storage finished. TestId: ${currentTestId || 'fallback'}`
-        );
       }
 
       return {

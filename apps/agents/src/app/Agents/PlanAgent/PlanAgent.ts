@@ -163,8 +163,6 @@ export class PlanAgent extends BaseAgent {
           storePrototype: Object.getPrototypeOf(store).constructor.name
         });
         try {
-          console.log(store);
-
           await store.put(ns, "toolBatch", payload);
           console.log("[PlanAgent] store.put completed successfully", payload);
 
@@ -287,8 +285,6 @@ export class PlanAgent extends BaseAgent {
         promptParts.planningContextMsg,
         promptParts.outputRules
       ].join('\n\n');
-      console.log("[PlanAgent] unifiedPrompts:", unifiedPrompts);
-      
 
       // 动态获取SQL工具提示词，包含MCP信息
       const dynamicSqlToolPrompts = await getSqlToolPrompts();
@@ -399,7 +395,6 @@ export class PlanAgent extends BaseAgent {
           // 先直接解析；失败则尝试配平提取
           try {
             parsed = JSON.parse(text);
-            console.log("[PlanAgent] Successfully parsed JSON (direct)");
           } catch {
             const extracted = extractBalancedJson(text);
             if (extracted) {
@@ -515,7 +510,7 @@ export class PlanAgent extends BaseAgent {
           );
         }
         // 无论本批次是否产生任务，都推进到下一批，避免卡在某个批次
-        if (startIndex < totalTools) {
+        if (batchIndex + 1 < totalBatches) {
           const nextBatchIndex = Math.min(batchIndex + 1, totalBatches);
           const newState = {
             batchIndex: nextBatchIndex,

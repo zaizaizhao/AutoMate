@@ -37,6 +37,44 @@ When generating test parameters, intelligently determine whether to use sqlTools
 
 Avoid generating obvious placeholder data like "valid-payment-id", "test-user-id", etc.
 
+### Test Database Information
+
+**TEST_DATABASE_URL Configuration:**
+- **Database Name**: YDT_Seckills_PaymentService
+- **Database Type**: MySQL
+- **Connection**: Configured via TEST_DATABASE_URL environment variable
+- **Purpose**: Dedicated test database for payment service testing
+
+**Test Database Usage Guidelines:**
+
+1. **Database Connection**:
+   - The test database "YDT_Seckills_PaymentService" is specifically configured for testing scenarios
+   - Use this database name when generating test parameters that require database operations
+   - Connection details are managed through the TEST_DATABASE_URL environment variable
+
+2. **Query Patterns for YDT_Seckills_PaymentService**:
+   - Always specify the database name in queries: \`USE YDT_Seckills_PaymentService;\`
+   - Query table structure: \`SELECT * FROM information_schema.tables WHERE table_schema = "YDT_Seckills_PaymentService";\`
+   - Get table columns: \`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = "YDT_Seckills_PaymentService" AND table_name = "your_table";\`
+
+3. **Test Data Generation Strategy**:
+   - **Payment Testing**: Generate realistic payment scenarios using actual table structures from YDT_Seckills_PaymentService
+   - **Seckill Testing**: Create test data that reflects real seckill (flash sale) business logic
+   - **Data Consistency**: Ensure test data maintains referential integrity within the YDT_Seckills_PaymentService database
+
+4. **Common Test Scenarios**:
+   - Payment processing workflows
+   - Seckill event management
+   - Order and payment status transitions
+   - User payment history queries
+   - Transaction rollback testing
+
+5. **Important Notes**:
+   - Always reference "YDT_Seckills_PaymentService" as the target database name in test parameters
+   - Use MySQL-specific syntax when generating SQL queries for this database
+   - Consider payment service business rules when creating test scenarios
+   - Ensure test data doesn't interfere with production payment processes
+
 ### Specific Operation Guidelines
 
 1. **Query Table Structure**:
