@@ -15,14 +15,6 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
       url: process.env.MCP_TEST_SERVER_URL || "http://localhost:8080/mcp",
       transport: (process.env.MCP_TEST_SERVER_TRANSPORT as "http" | "stdio") || "http",
     },
-    "json-writer": {
-      // JSON Writer MCP server for structured data writing
-      command: process.env.MCP_JSON_WRITER_COMMAND || "tsx",
-      args: process.env.MCP_JSON_WRITER_ARGS
-        ? process.env.MCP_JSON_WRITER_ARGS.split(",")
-        : ["./src/mcp-servers/json-writer-server.ts"],
-      transport: (process.env.MCP_JSON_WRITER_TRANSPORT as "http" | "stdio") || "stdio",
-    },
     // "postgresql-hub": {
     //   command: process.env.NODE_ENV === 'production'
     //     ? "dbhub" // 生产环境使用全局安装
@@ -44,6 +36,155 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
 
 // 预定义的MCP服务器配置
 export const MCP_SERVER_CONFIGS: Record<string, MCPServerConfig> = getMCPServerConfigs();
+
+/**
+ * MCP工具调用监控器
+ */
+class MCPCallMonitor {
+  private static instance: MCPCallMonitor;
+  private callHistory: Array<{
+    timestamp: Date;
+    serverName: string;
+    toolName: string;
+    parameters: any;
+    result?: any;
+    error?: any;
+    duration?: number;
+  }> = [];
+  private listeners: Array<(call: any) => void> = [];
+
+  static getInstance(): MCPCallMonitor {
+    if (!MCPCallMonitor.instance) {
+      MCPCallMonitor.instance = new MCPCallMonitor();
+    }
+    return MCPCallMonitor.instance;
+  }
+
+  /**
+   * 记录MCP工具调用
+   */
+  logCall(serverName: string, toolName: string, parameters: any, result?: any, error?: any, duration?: number) {
+    const call = {
+      timestamp: new Date(),
+      serverName,
+      toolName,
+      parameters,
+      result,
+      error,
+      duration
+    };
+    
+    this.callHistory.push(call);
+    console.log(`[MCP-Monitor] ${serverName}/${toolName} called:`, {
+      parameters,
+      duration: duration ? `${duration}ms` : 'unknown',
+      success: !error
+    });
+    
+    // 通知监听器
+    this.listeners.forEach(listener => {
+      try {
+        listener(call);
+      } catch (e) {
+        console.error('[MCP-Monitor] Listener error:', e);
+      }
+    });
+  }
+
+  /**
+   * 添加调用监听器
+   */
+  addListener(listener: (call: any) => void) {
+    this.listeners.push(listener);
+  }
+
+  /**
+   * 移除调用监听器
+   */
+  removeListener(listener: (call: any) => void) {
+    const index = this.listeners.indexOf(listener);
+    if (index > -1) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  /**
+   * 获取调用历史
+   */
+  getCallHistory(serverName?: string, toolName?: string): any[] {
+    let history = this.callHistory;
+    
+    if (serverName) {
+      history = history.filter(call => call.serverName === serverName);
+    }
+    
+    if (toolName) {
+      history = history.filter(call => call.toolName === toolName);
+    }
+    
+    return history;
+  }
+
+  /**
+   * 获取最近的调用
+   */
+  getRecentCalls(count: number = 10): any[] {
+    return this.callHistory.slice(-count);
+  }
+
+  /**
+   * 清除调用历史
+   */
+  clearHistory() {
+    this.callHistory = [];
+  }
+
+  /**
+   * 检查特定工具是否被调用过
+   */
+  hasBeenCalled(serverName: string, toolName?: string): boolean {
+    return this.callHistory.some(call => {
+      if (call.serverName !== serverName) return false;
+      if (toolName && call.toolName !== toolName) return false;
+      return true;
+    });
+  }
+
+  /**
+   * 获取调用统计
+   */
+  getCallStats(serverName?: string): any {
+    let calls = this.callHistory;
+    if (serverName) {
+      calls = calls.filter(call => call.serverName === serverName);
+    }
+
+    const stats = {
+      totalCalls: calls.length,
+      successfulCalls: calls.filter(call => !call.error).length,
+      failedCalls: calls.filter(call => call.error).length,
+      averageDuration: 0,
+      toolBreakdown: {} as Record<string, number>
+    };
+
+    // 计算平均耗时
+    const durationsWithValue = calls.filter(call => call.duration).map(call => call.duration!);
+    if (durationsWithValue.length > 0) {
+      stats.averageDuration = durationsWithValue.reduce((sum, duration) => sum + duration, 0) / durationsWithValue.length;
+    }
+
+    // 工具调用分布
+    calls.forEach(call => {
+      const key = `${call.serverName}/${call.toolName}`;
+      stats.toolBreakdown[key] = (stats.toolBreakdown[key] || 0) + 1;
+    });
+
+    return stats;
+  }
+}
+
+// 全局监控器实例
+export const mcpCallMonitor = MCPCallMonitor.getInstance();
 
 /**
  * MCP客户端管理器 - 支持按需连接特定的MCP服务器
@@ -83,11 +224,36 @@ export class MCPClientManager {
   }
 
   /**
-   * 获取指定MCP服务器的工具
+   * 获取指定MCP服务器的工具（带监控）
    */
   async getTools(serverNames: string[]): Promise<any[]> {
-    const client = this.getClient(serverNames);
-    return await client.getTools();
+    const startTime = Date.now();
+    try {
+      const client = this.getClient(serverNames);
+      const tools = await client.getTools();
+      
+      // 记录工具获取调用
+      mcpCallMonitor.logCall(
+        serverNames.join(','), 
+        'getTools', 
+        { serverNames }, 
+        { toolCount: tools.length },
+        undefined,
+        Date.now() - startTime
+      );
+      
+      return tools;
+    } catch (error) {
+      mcpCallMonitor.logCall(
+        serverNames.join(','), 
+        'getTools', 
+        { serverNames }, 
+        undefined,
+        error,
+        Date.now() - startTime
+      );
+      throw error;
+    }
   }
 
   /**

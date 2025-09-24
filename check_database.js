@@ -1,8 +1,9 @@
 const { Pool } = require('pg');
+require('dotenv').config();
 
 async function checkDatabase() {
   const pool = new Pool({
-    connectionString: 'postgresql://postgres:111111@192.168.1.11:15432/agents'
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:111111@localhost:5432/agents'
   });
 
   try {

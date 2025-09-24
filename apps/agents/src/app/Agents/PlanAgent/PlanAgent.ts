@@ -260,9 +260,13 @@ export class PlanAgent extends BaseAgent {
     }
     
 
+    // 获取数据库MCP工具（用于查询真实数据）
+    const dbTools = await getPostgresqlHubTools();
+    console.log(`[PlanAgent] Loaded ${dbTools?.length} database MCP tools:`, dbTools.map(t => t.name));
+    
     const planReactAgent = await createReactAgent({
       llm: this.llm,
-      tools: await getPostgresqlHubTools()
+      tools: dbTools
     })
 
     try {

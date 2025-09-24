@@ -1,5 +1,36 @@
 import { getPostgresqlHubResources, getPostgresqlHubPrompts } from '../../mcp-servers/mcp-client.js';
 
+/**
+ * 解析TEST_DATABASE_URL环境变量，提取数据库类型和名称
+ */
+function parseDatabaseConfig() {
+  const testDatabaseUrl = process.env.TEST_DATABASE_URL || '';
+  
+  // 默认值
+  let dbType = 'postgresql';
+  let dbName = 'products';
+  
+  if (testDatabaseUrl) {
+    try {
+      // 解析URL格式: postgresql://user:password@host:port/database
+      const url = new URL(testDatabaseUrl);
+      dbType = url.protocol.replace(':', ''); // 移除冒号
+      dbName = url.pathname.replace('/', ''); // 移除前导斜杠
+    } catch (error) {
+      console.warn('Failed to parse TEST_DATABASE_URL, using defaults:', error);
+    }
+  }
+  
+  return {
+    type: dbType,
+    name: dbName,
+    displayType: dbType === 'postgresql' ? 'PostgreSQL' : dbType.toUpperCase()
+  };
+}
+
+// 获取数据库配置
+const dbConfig = parseDatabaseConfig();
+
 export const TOOL_MESSAGE_EXTRACT_PROMPT = `You are a helpful AI assistant.
 You are a preprocessing agent responsible for API testing using tools.
 Your task is to identify and catalog all available tools, organize them into a structured list of API testing tasks, 
@@ -7,7 +38,7 @@ and pass this list to downstream testing agents for execution.
 System time: {system_time}`;
 
 
-// 静态的SQL工具提示词内容
+// 动态的SQL工具提示词内容
 const staticSqlToolPrompts = `## Important: Using Real Data for Test Parameter Generation
 
 ### Database Query Guidelines
@@ -40,40 +71,40 @@ Avoid generating obvious placeholder data like "valid-payment-id", "test-user-id
 ### Test Database Information
 
 **TEST_DATABASE_URL Configuration:**
-- **Database Name**: YDT_Seckills_PaymentService
-- **Database Type**: MySQL
+- **Database Name**: ${dbConfig.name}
+- **Database Type**: ${dbConfig.displayType}
 - **Connection**: Configured via TEST_DATABASE_URL environment variable
-- **Purpose**: Dedicated test database for payment service testing
+- **Purpose**: Dedicated test database for testing scenarios
 
 **Test Database Usage Guidelines:**
 
 1. **Database Connection**:
-   - The test database "YDT_Seckills_PaymentService" is specifically configured for testing scenarios
+   - The test database "${dbConfig.name}" is specifically configured for testing scenarios
    - Use this database name when generating test parameters that require database operations
    - Connection details are managed through the TEST_DATABASE_URL environment variable
 
-2. **Query Patterns for YDT_Seckills_PaymentService**:
-   - Always specify the database name in queries: \`USE YDT_Seckills_PaymentService;\`
-   - Query table structure: \`SELECT * FROM information_schema.tables WHERE table_schema = "YDT_Seckills_PaymentService";\`
-   - Get table columns: \`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = "YDT_Seckills_PaymentService" AND table_name = "your_table";\`
+2. **Query Patterns for ${dbConfig.name}**:
+   - Connect to database: \`\\c ${dbConfig.name};\` (PostgreSQL syntax)
+   - Query table structure: \`SELECT * FROM information_schema.tables WHERE table_catalog = '${dbConfig.name}' AND table_schema = 'public';\`
+   - Get table columns: \`SELECT column_name, data_type FROM information_schema.columns WHERE table_catalog = '${dbConfig.name}' AND table_schema = 'public' AND table_name = 'your_table';\`
 
 3. **Test Data Generation Strategy**:
-   - **Payment Testing**: Generate realistic payment scenarios using actual table structures from YDT_Seckills_PaymentService
-   - **Seckill Testing**: Create test data that reflects real seckill (flash sale) business logic
-   - **Data Consistency**: Ensure test data maintains referential integrity within the YDT_Seckills_PaymentService database
+   - **Database Testing**: Generate realistic test scenarios using actual table structures from ${dbConfig.name}
+   - **Business Logic Testing**: Create test data that reflects real business logic requirements
+   - **Data Consistency**: Ensure test data maintains referential integrity within the ${dbConfig.name} database
 
 4. **Common Test Scenarios**:
-   - Payment processing workflows
-   - Seckill event management
-   - Order and payment status transitions
-   - User payment history queries
+   - CRUD operations testing
+   - Data validation and constraints
+   - Relationship integrity testing
+   - Query performance testing
    - Transaction rollback testing
 
 5. **Important Notes**:
-   - Always reference "YDT_Seckills_PaymentService" as the target database name in test parameters
-   - Use MySQL-specific syntax when generating SQL queries for this database
-   - Consider payment service business rules when creating test scenarios
-   - Ensure test data doesn't interfere with production payment processes
+   - Always reference "${dbConfig.name}" as the target database name in test parameters
+   - Use ${dbConfig.displayType}-specific syntax when generating SQL queries for this database
+   - Consider business logic requirements when creating test scenarios
+   - Ensure test data doesn't interfere with production processes
 
 ### Specific Operation Guidelines
 
@@ -270,8 +301,8 @@ export function buildUnifiedPlanPrompts(config: PlanPromptConfig) {
       2
     )}`;
 
-  // 工具上下文
-  const toolsContext = `You have the following available interface message for THIS BATCH (5 per call). Use the exact value in the "name" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\nINTERFACE_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}`;
+  // 工具上下文 - 这里是测试接口工具信息，用于生成测试任务
+  const toolsContext = `You have the following TEST INTERFACE tools for THIS BATCH (5 per call). These are the API endpoints you need to generate test tasks for. Use the exact value in the "name" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\n\nTEST_INTERFACE_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}\n\nIMPORTANT: You also have access to DATABASE MCP TOOLS (like postgresql-hub/execute_sql) to query real data for generating realistic test parameters. Use these database tools to get actual IDs, table structures, and sample data before creating test tasks for the above interfaces.`;
 
   // 规划上下文消息
   const planningContextMsg = planningContext;
@@ -279,31 +310,33 @@ export function buildUnifiedPlanPrompts(config: PlanPromptConfig) {
   // 统一的输出规则（合并所有约束条件）
   const outputRules = [
     "OUTPUT_RULES:",
-    "- WORKFLOW REQUIREMENTS:",
-    "  * PHASE 1: Tool Calling Phase - You MUST first call available MCP tools to gather real data from the database",
-    "  * PHASE 2: JSON Generation Phase - After gathering real data, generate the final JSON response",
-    "  * You are REQUIRED to call MCP tools (like postgresql-hub) to get actual database data before generating parameters",
-    "  * NEVER use template strings, placeholders, or mock data in parameters",
+    "- TOOL USAGE WORKFLOW:",
+    "  * PHASE 1: Database Query Phase - First call DATABASE MCP TOOLS (postgresql-hub/execute_sql) to get real data",
+    "  * PHASE 2: Test Task Generation Phase - Generate test tasks for TEST INTERFACE tools using the real data",
+    "  * DATABASE MCP TOOLS: Use postgresql-hub/execute_sql to query database schema, existing IDs, sample data",
+    "  * TEST INTERFACE TOOLS: Generate test tasks for these API endpoints using real data from database queries",
+    "  * NEVER use template strings, placeholders, or mock data in test task parameters",
     "- FINAL OUTPUT FORMAT:",
-    "  * After tool calling phase, you MUST return only a JSON object with the following structure:",
+    "  * After database query phase, you MUST return only a JSON object with the following structure:",
     "  * Root object must have: batchIndex (number), tasks (array)",
     "  * Each task object must have:",
     "    - batchIndex: number (must equal root batchIndex)",
     "    - taskId: string (1-64 chars, only letters/numbers/underscore/dot/colon/dash)",
-    "    - toolName: string (exact tool name from tools list)",
+    "    - toolName: string (exact tool name from TEST INTERFACE tools list, NOT database tool names)",
     "    - description: string (task description)",
-    "    - parameters: object or string (tool parameters with REAL DATA only)",
+    "    - parameters: object or string (tool parameters with REAL DATA obtained from database queries)",
     "    - complexity: 'low' | 'medium' | 'high'",
     "    - isRequiredValidateByDatabase: boolean (true for operations that modify DB or need validation)",
     "- BATCH CONSTRAINTS:",
     "  * All taskIds within same batch must be unique",
     "  * Each task's batchIndex must equal the root batchIndex",
-    "  * Tasks must ONLY use tools in this batch; use exact tool name from tools list",
+    "  * Tasks must ONLY use TEST INTERFACE tools in this batch; use exact tool name from TEST_INTERFACE_JSON",
+    "  * Do NOT create tasks for database MCP tools - they are only for data gathering",
     "- PARAMETER CONSTRAINTS:",
-    "  * Parameters must conform to the tool inputSchema",
-    "  * Parameters must contain ONLY real data obtained from MCP tool calls",
+    "  * Parameters must conform to the TEST INTERFACE tool inputSchema",
+    "  * Parameters must contain ONLY real data obtained from database MCP tool calls",
     "  * FORBIDDEN: Template strings like {{execute_sql(...)}}, placeholder values, or mock data",
-    "  * REQUIRED: Use actual values returned from database queries",
+    "  * REQUIRED: Use actual values returned from database queries via postgresql-hub/execute_sql",
     "- FORMAT CONSTRAINTS:",
     "  * Final output must be valid, parseable JSON only",
     "  * No code fences, no markdown, no natural language in final JSON output",
