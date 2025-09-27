@@ -26,7 +26,7 @@ export class PlanAgent extends BaseAgent {
   }
 
   protected async initializellm() {
-    this.llm = await loadChatModel("openai/deepseek-ai/DeepSeek-V3");
+    this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
   }
 
   async planNode(
