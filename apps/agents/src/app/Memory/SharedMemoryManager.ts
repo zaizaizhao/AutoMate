@@ -26,6 +26,7 @@ export interface TaskPlanedForTest {
   parameters: Record<string, any> | string;
   complexity: "low" | "medium" | "high";
   isRequiredValidateByDatabase: boolean;
+  expectedResult?: "success" | "fail";
 }
 
 export interface TaskTest {
@@ -127,6 +128,7 @@ export class SharedMemoryManager {
           parameters JSONB,
           complexity VARCHAR(20) CHECK (complexity IN ('low', 'medium', 'high')),
           is_required_validate_by_database BOOLEAN DEFAULT false,
+          expected_result VARCHAR(20) DEFAULT 'success' CHECK (expected_result IN ('success', 'fail')),
           status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
           result JSONB,
           error_message TEXT,
@@ -429,8 +431,8 @@ export class SharedMemoryManager {
       await client.query(
         `INSERT INTO task_plans (
           plan_id, batch_index, task_id, tool_name, description, 
-          parameters, complexity, is_required_validate_by_database
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          parameters, complexity, is_required_validate_by_database, expected_result
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (task_id) 
         DO UPDATE SET 
           batch_index = EXCLUDED.batch_index,
@@ -439,6 +441,7 @@ export class SharedMemoryManager {
           parameters = EXCLUDED.parameters,
           complexity = EXCLUDED.complexity,
           is_required_validate_by_database = EXCLUDED.is_required_validate_by_database,
+          expected_result = EXCLUDED.expected_result,
           updated_at = NOW()`,
         [
           planId,
@@ -449,6 +452,7 @@ export class SharedMemoryManager {
           JSON.stringify(task.parameters),
           task.complexity,
           task.isRequiredValidateByDatabase,
+          task.expectedResult || 'success',
         ]
       );
     } finally {
@@ -469,8 +473,8 @@ export class SharedMemoryManager {
         await client.query(
           `INSERT INTO task_plans (
             plan_id, batch_index, task_id, tool_name, description, 
-            parameters, complexity, is_required_validate_by_database
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            parameters, complexity, is_required_validate_by_database, expected_result
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (task_id) 
           DO UPDATE SET 
             batch_index = EXCLUDED.batch_index,
@@ -479,6 +483,7 @@ export class SharedMemoryManager {
             parameters = EXCLUDED.parameters,
             complexity = EXCLUDED.complexity,
             is_required_validate_by_database = EXCLUDED.is_required_validate_by_database,
+            expected_result = EXCLUDED.expected_result,
             updated_at = NOW()`,
           [
             planId,
@@ -489,6 +494,7 @@ export class SharedMemoryManager {
             JSON.stringify(task.parameters),
             task.complexity,
             task.isRequiredValidateByDatabase,
+            task.expectedResult || 'success',
           ]
         );
       }
@@ -507,7 +513,7 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
-        `SELECT batch_index, task_id, tool_name, description, parameters, complexity, is_required_validate_by_database
+        `SELECT batch_index, task_id, tool_name, description, parameters, complexity, is_required_validate_by_database, expected_result
          FROM task_plans
          WHERE task_id = $1`,
         [taskId]
@@ -529,6 +535,7 @@ export class SharedMemoryManager {
             : row.parameters,
         complexity: row.complexity,
         isRequiredValidateByDatabase: row.is_required_validate_by_database,
+        expectedResult: row.expected_result,
       };
     } finally {
       client.release();
@@ -543,7 +550,7 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
-        `SELECT batch_index, task_id, tool_name, description, parameters, complexity, is_required_validate_by_database
+        `SELECT batch_index, task_id, tool_name, description, parameters, complexity, is_required_validate_by_database, expected_result
          FROM task_plans
          WHERE plan_id = $1 AND batch_index = $2
          ORDER BY created_at ASC`,
@@ -561,6 +568,7 @@ export class SharedMemoryManager {
             : row.parameters,
         complexity: row.complexity,
         isRequiredValidateByDatabase: row.is_required_validate_by_database,
+        expectedResult: row.expected_result,
       }));
     } finally {
       client.release();
@@ -572,7 +580,7 @@ export class SharedMemoryManager {
     const client = await this.pool.connect();
     try {
       const result = await client.query(
-        `SELECT batch_index, task_id, tool_name, description, parameters, complexity, is_required_validate_by_database
+        `SELECT batch_index, task_id, tool_name, description, parameters, complexity, is_required_validate_by_database, expected_result
          FROM task_plans
          WHERE plan_id = $1
          ORDER BY batch_index ASC, created_at ASC`,
@@ -590,7 +598,8 @@ export class SharedMemoryManager {
             : row.parameters,
         complexity: row.complexity,
         isRequiredValidateByDatabase: row.is_required_validate_by_database,
-      }));
+        expectedResult: row.expected_result,
+       }));
     } finally {
       client.release();
     }

@@ -327,6 +327,7 @@ export function buildUnifiedPlanPrompts(config: PlanPromptConfig) {
     "    - parameters: object or string (tool parameters with REAL DATA obtained from database queries)",
     "    - complexity: 'low' | 'medium' | 'high'",
     "    - isRequiredValidateByDatabase: boolean (true for operations that modify DB or need validation)",
+    "    - expectedResult: 'success' | 'fail' (expected test result, 'success' means expecting tool execution to succeed, 'fail' means expecting tool execution to fail for testing error handling logic, defaults to 'success')",
     "- BATCH CONSTRAINTS:",
     "  * All taskIds within same batch must be unique",
     "  * Each task's batchIndex must equal the root batchIndex",

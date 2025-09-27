@@ -693,8 +693,20 @@ export class ExecuteTestAgent extends BaseAgent {
           }
         };
       }
-      const isSuccess = evaluationResult.status === "SUCCESS";
-      const isError = evaluationResult.status === "FAILURE";
+      // 根据任务的期望结果来判断测试是否成功
+      const expectedResult = completedTask?.expectedResult || 'success';
+      let isSuccess: boolean;
+      let isError: boolean;
+      
+      if (expectedResult === 'fail') {
+        // 如果期望是失败，那么工具返回错误状态应该被认为是测试成功
+        isSuccess = evaluationResult.status === "FAILURE";
+        isError = evaluationResult.status === "SUCCESS";
+      } else {
+        // 如果期望是成功，那么工具返回成功状态应该被认为是测试成功
+        isSuccess = evaluationResult.status === "SUCCESS";
+        isError = evaluationResult.status === "FAILURE";
+      }
 
       // 更新测试结果到task_test表
       if (completedTask?.taskId) {
@@ -860,7 +872,7 @@ export class ExecuteTestAgent extends BaseAgent {
 
       // 如果这是最后一个任务，添加额外的日志确认数据已完全存储
       if (isLastTaskInBatch) {
-        const currentTestId = (execProgress as any)?.currentTestId;
+        // 数据已完全存储到数据库
       }
 
       return {

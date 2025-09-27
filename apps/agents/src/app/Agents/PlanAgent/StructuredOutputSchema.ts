@@ -34,6 +34,9 @@ const TaskSchema = z.object({
     "4. 如果是纯查询操作且不需要验证数据准确性（如获取列表、统计信息），设置为false；" +
     "5. 根据工具描述和预期影响智能判断，重点考虑是否需要验证操作后的数据库状态"
   ),
+  expectedResult: z.enum(["success", "fail"]).optional().default("success").describe(
+    "期望的测试结果。success表示期望工具执行成功，fail表示期望工具执行失败（用于测试错误处理逻辑）"
+  ),
 });
 
 // 计划输出的完整schema
@@ -69,3 +72,4 @@ export const planOutputSchema = z
 export type PlanOutput = z.infer<typeof planOutputSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type ComplexityType = z.infer<typeof ComplexityLevel>;
+//!  todo: 没法和createReactAgent同时使用

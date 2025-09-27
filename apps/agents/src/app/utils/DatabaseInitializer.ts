@@ -145,6 +145,7 @@ export class DatabaseInitializer {
             is_required_validate_by_database BOOLEAN DEFAULT false,
             status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'completed', 'failed')),
             result JSONB,
+            expected_result VARCHAR(20) DEFAULT 'success' CHECK (expected_result IN ('success', 'fail')),
             error_message TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -275,6 +276,29 @@ export class DatabaseInitializer {
           console.log("[DB Migration] evaluation_result字段添加成功");
         } else {
           console.log("[DB Migration] task_test表的evaluation_result字段已存在，跳过迁移");
+        }
+
+        // 检查task_plans表是否存在expected_result字段
+        const taskPlansColumnCheck = await client.query(`
+          SELECT column_name 
+          FROM information_schema.columns 
+          WHERE table_name = 'task_plans' 
+            AND column_name = 'expected_result'
+            AND table_schema = 'public'
+        `);
+
+        if (taskPlansColumnCheck.rows.length === 0) {
+          console.log("[DB Migration] task_plans表缺少expected_result字段，正在添加...");
+          
+          // 添加expected_result字段
+          await client.query(`
+            ALTER TABLE task_plans 
+            ADD COLUMN expected_result VARCHAR(20) DEFAULT 'success' CHECK (expected_result IN ('success', 'fail'))
+          `);
+          
+          console.log("[DB Migration] expected_result字段添加成功");
+        } else {
+          console.log("[DB Migration] task_plans表的expected_result字段已存在，跳过迁移");
         }
         
         console.log("[DB Migration] 数据库迁移完成");
