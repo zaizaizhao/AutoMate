@@ -108,6 +108,7 @@ const PlanAgentAnnotation = Annotation.Root({
   }),
 })
 import { BaseAgent, AgentConfig } from "../../BaseAgent/BaseAgent.js";
+import { getDatabaseAdapter } from "./DatabaseAdapter.js";
 
 import { AIMessage } from "@langchain/core/messages";
 // import { ConfigurationSchema } from "../../ModelUtils/Config.js";
@@ -132,6 +133,29 @@ export class PlanAgent extends BaseAgent {
 
   protected async initializellm() {
     this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
+  }
+
+  /**
+   * 解析SQL查询结果 - 处理JSON字符串格式的响应
+   * @param result SQL工具返回的结果
+   * @returns 解析后的数据或原始结果
+   */
+  private parseSqlResult(result: any): any {
+    if (typeof result === 'string') {
+      try {
+        const parsed = JSON.parse(result);
+        // 如果解析成功且有success和data字段，返回data中的rows
+        if (parsed && typeof parsed === 'object' && parsed.success && parsed.data) {
+          return parsed.data.rows || parsed.data;
+        }
+        // 否则返回整个解析结果
+        return parsed;
+      } catch (error) {
+        console.warn('[PlanAgent] Failed to parse SQL result as JSON:', error);
+        return result;
+      }
+    }
+    return result;
   }
 
   /**
@@ -210,7 +234,8 @@ export class PlanAgent extends BaseAgent {
           try {
             console.log(`[PlanAgent] Executing specific query for ${queryInfo.type}: ${queryInfo.query}`);
             const result = await sqlTool.call({ sql: queryInfo.query });
-            queryResults[queryInfo.key] = result;
+            const parsedResult = this.parseSqlResult(result);
+            queryResults[queryInfo.key] = parsedResult;
             console.log(`[PlanAgent] Specific query ${queryInfo.type} successful:`, {
               resultType: typeof result,
               isArray: Array.isArray(result),
@@ -241,11 +266,12 @@ export class PlanAgent extends BaseAgent {
 
       // 默认的基础schema查询（首次查询或无特定请求时）
       console.log('[PlanAgent] Executing basic schema queries...');
+      const dbAdapter = getDatabaseAdapter();
       const schemaQueries = [
-        // MySQL兼容的表查询
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name;",
-        // MySQL兼容的列查询
-        "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = DATABASE() ORDER BY table_name, ordinal_position;"
+        // 动态生成的表查询
+        dbAdapter.getTableListQuery(),
+        // 动态生成的列查询
+        dbAdapter.getColumnInfoQuery()
       ];
 
       let querySuccessCount = 0;
@@ -256,7 +282,8 @@ export class PlanAgent extends BaseAgent {
         try {
           console.log(`[PlanAgent] Executing ${queryType} query: ${query}`);
           const result = await sqlTool.call({ sql: query });
-          queryResults[queryType] = result;
+          const parsedResult = this.parseSqlResult(result);
+          queryResults[queryType] = parsedResult;
           querySuccessCount++;
           
           console.log(`[PlanAgent] ${queryType} query successful:`, {
@@ -279,10 +306,11 @@ export class PlanAgent extends BaseAgent {
       if (querySuccessCount === 0) {
         console.log('[PlanAgent] Basic schema queries failed, trying simple table listing...');
         try {
-          const simpleQuery = "SHOW TABLES;";
+          const simpleQuery = dbAdapter.getSimpleTableListQuery();
           console.log(`[PlanAgent] Executing simple query: ${simpleQuery}`);
           const result = await sqlTool.call({ sql: simpleQuery });
-          queryResults.tables_simple = result;
+          const parsedResult = this.parseSqlResult(result);
+          queryResults.tables_simple = parsedResult;
           console.log('[PlanAgent] Simple table query successful:', result);
         } catch (error) {
           console.error('[PlanAgent] Even simple table query failed:', error);
@@ -299,9 +327,10 @@ export class PlanAgent extends BaseAgent {
           if (tableName) {
             try {
               console.log(`[PlanAgent] Getting sample data from table: ${tableName}`);
-              const sampleQuery = `SELECT * FROM \`${tableName}\` LIMIT 5;`; // MySQL兼容的反引号
+              const sampleQuery = dbAdapter.getSampleDataQuery(tableName, 5);
               const sampleResult = await sqlTool.call({ sql: sampleQuery });
-              queryResults[`sample_${tableName}`] = sampleResult;
+              const parsedSampleResult = this.parseSqlResult(sampleResult);
+              queryResults[`sample_${tableName}`] = parsedSampleResult;
               console.log(`[PlanAgent] Sample data from ${tableName}:`, {
                 resultType: typeof sampleResult,
                 isArray: Array.isArray(sampleResult),
@@ -408,7 +437,7 @@ export class PlanAgent extends BaseAgent {
       console.log(`[PlanAgent] Data assessment for ${currentTool.name}:`, dataAssessment);
 
       // 如果数据不足且未达到最大查询轮次，请求更多数据
-      if (!dataAssessment.isDataSufficient && (queryRound || 0) < 3) {
+      if (!dataAssessment.isDataSufficient && (queryRound || 0) < 8) {
         console.log(`[PlanAgent] Data insufficient for ${currentTool.name}, requesting additional data`);
         
         const queryRequest = {
@@ -636,14 +665,13 @@ Be strict in your assessment - only mark as sufficient if you can generate a rea
   }
 
   /**
-   * 根据LLM评估的缺失数据构建特定的SQL查询
+   * 根据LLM评估的缺失数据构建通用的数据库发现查询
    * 
-   * 支持的数据类型：
-   * - user_data/users: 用户相关数据
-   * - product_data/products: 产品相关数据  
-   * - order_data/orders: 订单相关数据
-   * - sample_data/table_records: 表样本数据
-   * - id_references/foreign_keys: 外键关联数据
+   * 采用动态发现策略，不依赖特定表名：
+   * - schema_info: 获取数据库结构信息
+   * - table_samples: 获取各表的样本数据
+   * - relationships: 获取表间关系信息
+   * - data_types: 获取列数据类型信息
    * 
    * 每个查询包含：
    * - type: 数据类型标识
@@ -655,48 +683,69 @@ Be strict in your assessment - only mark as sufficient if you can generate a rea
    */
   private buildSpecificQueries(missingData: string[]): Array<{type: string, query: string, key: string}> {
     const queries: Array<{type: string, query: string, key: string}> = [];
+    const dbAdapter = getDatabaseAdapter();
     
     for (const missing of missingData) {
-      switch (missing.toLowerCase()) {
-        case 'user_data':
-        case 'users':
-          queries.push({type: 'users', query: 'SELECT * FROM users LIMIT 10;', key: 'users_data'});
-          break;
-        case 'product_data':
-        case 'products':
-          queries.push({type: 'products', query: 'SELECT * FROM products LIMIT 10;', key: 'products_data'});
-          break;
-        case 'order_data':
-        case 'orders':
-          queries.push({type: 'orders', query: 'SELECT * FROM orders LIMIT 10;', key: 'orders_data'});
-          break;
-        case 'sample_data':
-        case 'table_records':
-          // 获取所有表的样本数据
-          queries.push({type: 'tables', query: 'SHOW TABLES;', key: 'tables_list'});
-          break;
-        case 'id_references':
-        case 'foreign_keys':
-          queries.push({type: 'foreign_keys', query: `SELECT 
-            COLUMN_NAME, 
-            REFERENCED_TABLE_NAME, 
-            REFERENCED_COLUMN_NAME 
-          FROM information_schema.KEY_COLUMN_USAGE 
-          WHERE REFERENCED_TABLE_NAME IS NOT NULL 
-          AND TABLE_SCHEMA = DATABASE();`, key: 'foreign_keys_data'});
-          break;
-        default:
-          // 通用查询
-          queries.push({type: missing, query: `SELECT * FROM ${missing} LIMIT 10;`, key: `${missing}_data`});
-          break;
-      }
+      const missingLower = missing.toLowerCase();
+      
+      // 根据缺失数据类型构建通用发现查询
+       if (missingLower.includes('schema') || missingLower.includes('structure') || missingLower.includes('table')) {
+         // 数据库结构信息 - 使用适配器
+         queries.push({
+           type: 'schema_info', 
+           query: dbAdapter.getTableListQuery(), 
+           key: 'schema_tables'
+         });
+         queries.push({
+           type: 'column_info', 
+           query: dbAdapter.getColumnInfoQuery(), 
+           key: 'schema_columns'
+         });
+       } else if (missingLower.includes('sample') || missingLower.includes('data') || missingLower.includes('record')) {
+         // 样本数据 - 先获取表列表，然后动态查询
+         queries.push({
+           type: 'table_discovery', 
+           query: dbAdapter.getTableListQuery(), 
+           key: 'available_tables'
+         });
+       } else if (missingLower.includes('relationship') || missingLower.includes('foreign') || missingLower.includes('reference')) {
+         // 表关系信息 - 使用适配器
+         queries.push({
+           type: 'relationships', 
+           query: dbAdapter.getForeignKeyQuery(), 
+           key: 'table_relationships'
+         });
+       } else if (missingLower.includes('constraint') || missingLower.includes('key')) {
+         // 约束和键信息 - 使用适配器
+         queries.push({
+           type: 'constraints', 
+           query: dbAdapter.getConstraintsQuery(), 
+           key: 'table_constraints'
+         });
+       } else {
+         // 对于其他描述性文本，使用通用的数据库概览查询
+         console.log(`[PlanAgent] Using generic database overview for: "${missing}"`);
+         queries.push({
+           type: 'database_overview', 
+           query: dbAdapter.getDatabaseOverviewQuery(), 
+           key: 'db_overview'
+         });
+       }
     }
     
-    // 如果没有特定查询，添加通用查询
-    if (queries.length === 0) {
-      queries.push({type: 'tables', query: 'SHOW TABLES;', key: 'tables_fallback'});
-      queries.push({type: 'table_count', query: 'SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = DATABASE();', key: 'table_count'});
-    }
+    // 如果没有特定查询，添加基础的数据库发现查询
+     if (queries.length === 0) {
+       queries.push({
+         type: 'basic_discovery', 
+         query: dbAdapter.getTableListQuery(), 
+         key: 'basic_tables'
+       });
+       queries.push({
+         type: 'basic_stats', 
+         query: dbAdapter.getDatabaseOverviewQuery(), 
+         key: 'basic_stats'
+       });
+     }
     
     return queries;
   }
@@ -733,7 +782,8 @@ Be strict in your assessment - only mark as sufficient if you can generate a rea
           if (query) {
             console.log(`[PlanAgent] Executing targeted query for ${need.type}:`, query);
             const result = await sqlTool.call({ sql: query });
-            enhancedResults[`targeted_${need.type}`] = result;
+            const parsedResult = this.parseSqlResult(result);
+            enhancedResults[`targeted_${need.type}`] = parsedResult;
             console.log(`[PlanAgent] Enhanced data for ${need.type}:`, {
               resultType: typeof result,
               isArray: Array.isArray(result),
@@ -835,8 +885,47 @@ Be strict in your assessment - only mark as sufficient if you can generate a rea
     
     const tableName = matchingTable.table_name || matchingTable.TABLE_NAME;
     
-    // 构建查询，获取最新的几条记录
-    return `SELECT * FROM \`${tableName}\` ORDER BY id DESC LIMIT 10;`;
+    try {
+      // 使用数据库适配器构建查询
+      const dbAdapter = getDatabaseAdapter();
+      let orderByColumn = '';
+      
+      // 检查是否有列信息来确定排序字段
+      if (baseResults.columns && Array.isArray(baseResults.columns)) {
+        const tableColumns = baseResults.columns.filter((col: any) => 
+          (col.table_name || col.TABLE_NAME || '').toLowerCase() === tableName.toLowerCase()
+        );
+        
+        // 查找id相关字段
+        const idColumn = tableColumns.find((col: any) => {
+          const colName = (col.column_name || col.COLUMN_NAME || '').toLowerCase();
+          return colName === 'id' || colName.endsWith('_id') || colName === 'uuid';
+        });
+        
+        if (idColumn) {
+          orderByColumn = idColumn.column_name || idColumn.COLUMN_NAME;
+        } else {
+          // 如果没有id字段，尝试使用第一个字段
+          if (tableColumns.length > 0) {
+            orderByColumn = tableColumns[0].column_name || tableColumns[0].COLUMN_NAME;
+          }
+        }
+      } else {
+        // 如果没有列信息，尝试使用常见的id字段名
+        orderByColumn = 'id';
+      }
+      
+      // 使用数据库适配器生成查询
+      const query = dbAdapter.getSampleDataQueryWithOrder(tableName, 10, orderByColumn, 'DESC');
+      console.log(`[PlanAgent] Built targeted query for ${need.type}: ${query}`);
+      return query;
+      
+    } catch (error) {
+      console.error(`[PlanAgent] Error building targeted query for ${need.type}:`, error);
+      // 降级到最简单的查询
+      const dbAdapter = getDatabaseAdapter();
+      return dbAdapter.getSampleDataQuery(tableName, 10);
+    }
   }
 
   // 构建单个工具的提示词
@@ -960,7 +1049,7 @@ Example output format (using real database values):
       // 优先检查是否有数据查询请求（来自plan-generation-node的数据不足判断）
       if (dataQueryRequest && dataQueryRequest.needsMoreData) {
         const currentRound = queryRound ?? 0;
-        const maxRounds = 3; // 最大查询轮次限制
+        const maxRounds = 8; // 最大查询轮次限制
         
         if (currentRound < maxRounds) {
           console.log(`[PlanAgent] Data query requested (round ${currentRound + 1}/${maxRounds}), routing to data-query-node`);
