@@ -109,7 +109,7 @@ Avoid generating obvious placeholder data like "valid-payment-id", "test-user-id
 ### Specific Operation Guidelines
 
 1. **Query Table Structure**:
-   - Use postgresql-hub tool to query table structure:
+   - Use sql-hub tool to query table structure:
    SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'table_name' ORDER BY ordinal_position;
    - Understand field types, constraint conditions, and other information
 
@@ -225,10 +225,10 @@ export async function getSqlToolPrompts(): Promise<string> {
       mcpInfo += '- **REQUIRED**: All parameters must be actual values, not templates or placeholders\n\n';
       mcpInfo += '**Correct Tool Usage Examples:**\n\n';
       mcpInfo += '1. To get real product IDs:\n';
-      mcpInfo += '   - Call: `postgresql-hub` tool with query: `SELECT id FROM products LIMIT 1;`\n';
+      mcpInfo += '   - Call: `sql-hub` tool with query: `SELECT id FROM products LIMIT 1;`\n';
       mcpInfo += '   - Use the returned actual ID value in your parameters\n\n';
       mcpInfo += '2. To get table schema:\n';
-      mcpInfo += '   - Call: `postgresql-hub` tool with query: `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = \'users\';`\n';
+      mcpInfo += '   - Call: `sql-hub` tool with query: `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = \'users\';`\n';
       mcpInfo += '   - Use the returned schema information to generate valid test data\n\n';
       mcpInfo += '**Parameter Generation Rules:**\n\n';
       mcpInfo += '- First call MCP tools to query database for real data\n';
@@ -236,7 +236,7 @@ export async function getSqlToolPrompts(): Promise<string> {
       mcpInfo += '- Never use placeholder syntax like `{{variable}}` or template strings\n';
       mcpInfo += '- Generate concrete, valid values based on real database content\n\n';
       mcpInfo += '**Available MCP Tools:**\n';
-      mcpInfo += '- `postgresql-hub`: Execute SQL queries against the database\n';
+      mcpInfo += '- `sql-hub`: Execute SQL queries against the database\n';
       mcpInfo += '- Use this tool to get real IDs, check table structures, and retrieve sample data\n';
     }
 
@@ -302,7 +302,7 @@ export function buildUnifiedPlanPrompts(config: PlanPromptConfig) {
     )}`;
 
   // 工具上下文 - 这里是测试接口工具信息，用于生成测试任务
-  const toolsContext = `You have the following TEST INTERFACE tools for THIS BATCH (5 per call). These are the API endpoints you need to generate test tasks for. Use the exact value in the "name" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\n\nTEST_INTERFACE_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}\n\nIMPORTANT: You also have access to DATABASE MCP TOOLS (like postgresql-hub/execute_sql) to query real data for generating realistic test parameters. Use these database tools to get actual IDs, table structures, and sample data before creating test tasks for the above interfaces.`;
+  const toolsContext = `You have the following TEST INTERFACE tools for THIS BATCH (5 per call). These are the API endpoints you need to generate test tasks for. Use the exact value in the "name" field as task.toolName when planning. Do NOT invent new tool names. Keep parameters aligned with inputSchema.\n\nTEST_INTERFACE_JSON=\n${JSON.stringify(selectedToolMeta, null, 2)}\n\nIMPORTANT: You also have access to DATABASE MCP TOOLS (like sql-hub/execute_sql) to query real data for generating realistic test parameters. Use these database tools to get actual IDs, table structures, and sample data before creating test tasks for the above interfaces.`;
 
   // 规划上下文消息
   const planningContextMsg = planningContext;
@@ -311,9 +311,9 @@ export function buildUnifiedPlanPrompts(config: PlanPromptConfig) {
   const outputRules = [
     "OUTPUT_RULES:",
     "- TOOL USAGE WORKFLOW:",
-    "  * PHASE 1: Database Query Phase - First call DATABASE MCP TOOLS (postgresql-hub/execute_sql) to get real data",
+    "  * PHASE 1: Database Query Phase - First call DATABASE MCP TOOLS (sql-hub/execute_sql) to get real data",
     "  * PHASE 2: Test Task Generation Phase - Generate test tasks for TEST INTERFACE tools using the real data",
-    "  * DATABASE MCP TOOLS: Use postgresql-hub/execute_sql to query database schema, existing IDs, sample data",
+    "  * DATABASE MCP TOOLS: Use sql-hub/execute_sql to query database schema, existing IDs, sample data",
     "  * TEST INTERFACE TOOLS: Generate test tasks for these API endpoints using real data from database queries",
     "  * NEVER use template strings, placeholders, or mock data in test task parameters",
     "- FINAL OUTPUT FORMAT:",
@@ -337,7 +337,7 @@ export function buildUnifiedPlanPrompts(config: PlanPromptConfig) {
     "  * Parameters must conform to the TEST INTERFACE tool inputSchema",
     "  * Parameters must contain ONLY real data obtained from database MCP tool calls",
     "  * FORBIDDEN: Template strings like {{execute_sql(...)}}, placeholder values, or mock data",
-    "  * REQUIRED: Use actual values returned from database queries via postgresql-hub/execute_sql",
+    "  * REQUIRED: Use actual values returned from database queries via sql-hub/execute_sql",
     "- FORMAT CONSTRAINTS:",
     "  * Final output must be valid, parseable JSON only",
     "  * No code fences, no markdown, no natural language in final JSON output",

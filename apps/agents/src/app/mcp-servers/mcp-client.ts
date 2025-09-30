@@ -15,7 +15,7 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
       url: process.env.MCP_TEST_SERVER_URL || "http://localhost:8080/mcp",
       transport: (process.env.MCP_TEST_SERVER_TRANSPORT as "http" | "stdio") || "http",
     },
-    // "postgresql-hub": {
+    // "sql-hub": {
     //   command: process.env.NODE_ENV === 'production'
     //     ? "dbhub" // 生产环境使用全局安装
     //     : "./node_modules/.bin/dbhub", // 开发环境使用本,
@@ -27,7 +27,7 @@ function getMCPServerConfigs(): Record<string, MCPServerConfig> {
     //   ],
     //   transport: "stdio",
     // }
-    "postgresql-hub": {
+    "sql-hub": {
       url: "http://localhost:8083/message",
       transport: "http",
     }
@@ -377,25 +377,25 @@ export async function getTestServerTools(): Promise<any[]> {
   return await mcpClientManager.getToolsFromServer("test-server");
 }
 
-// 专门为postgresql-hub agent提供的工具获取函数
+// 专门为sql-hub agent提供的工具获取函数
 export async function getPostgresqlHubTools(): Promise<any[]> {
-  return await mcpClientManager.getToolsFromServer("postgresql-hub");
+  return await mcpClientManager.getToolsFromServer("sql-hub");
 }
 
 export async function getPostgresqlHubResources(): Promise<any[]> {
-  return await mcpClientManager.getResources(["postgresql-hub"]);
+  return await mcpClientManager.getResources(["sql-hub"]);
 }
 
 export async function getPostgresqlHubResourceContent(uri: string): Promise<any> {
-  return await mcpClientManager.readResource(["postgresql-hub"], uri);
+  return await mcpClientManager.readResource(["sql-hub"], uri);
 }
 
 export async function getPostgresqlHubPrompts(): Promise<any[]> {
-  return await mcpClientManager.getPrompts(["postgresql-hub"]);
+  return await mcpClientManager.getPrompts(["sql-hub"]);
 }
 
 export async function getPostgresqlHubPrompt(name: string, args?: Record<string, any>): Promise<any> {
-  return await mcpClientManager.getPrompt(["postgresql-hub"], name, args);
+  return await mcpClientManager.getPrompt(["sql-hub"], name, args);
 }
 
 // 专门为json-writer agent提供的工具获取函数

@@ -159,6 +159,38 @@ export class PlanAgent extends BaseAgent {
   }
 
   /**
+   * 调用 SQL 工具，兼容不同参数键名（sql | query）并统一解析返回
+   */
+  private async callSqlWithFallback(
+    sqlTool: any,
+    query: string
+  ): Promise<{ raw: any; parsed: any; usedParam: 'sql' | 'query' }> {
+    // 优先尝试 { sql }
+    try {
+      const raw1 = await sqlTool.call({ sql: query });
+      const parsed1 = this.parseSqlResult(raw1);
+      // 如果解析后为数组或含 rows，则认为成功
+      const ok1 = Array.isArray(parsed1) || (parsed1 && typeof parsed1 === 'object' && Array.isArray((parsed1 as any).rows));
+      if (ok1) {
+        return { raw: raw1, parsed: Array.isArray(parsed1) ? parsed1 : (parsed1 as any).rows, usedParam: 'sql' };
+      }
+      // 若不是数组，继续尝试 { query }
+    } catch (e) {
+      // 继续回退
+    }
+
+    try {
+      const raw2 = await sqlTool.call({ query });
+      const parsed2 = this.parseSqlResult(raw2);
+      const result2 = Array.isArray(parsed2) ? parsed2 : (parsed2 && (parsed2 as any).rows);
+      return { raw: raw2, parsed: result2 ?? parsed2, usedParam: 'query' };
+    } catch (e2) {
+      // 双重失败，返回最后的异常信息占位
+      return { raw: e2, parsed: null, usedParam: 'query' };
+    }
+  }
+
+  /**
    * 数据查询节点 - 增强版，支持基于特定需求的目标查询
    * 
    * 支持两种查询模式：
@@ -233,13 +265,13 @@ export class PlanAgent extends BaseAgent {
         for (const queryInfo of specificQueries) {
           try {
             console.log(`[PlanAgent] Executing specific query for ${queryInfo.type}: ${queryInfo.query}`);
-            const result = await sqlTool.call({ sql: queryInfo.query });
-            const parsedResult = this.parseSqlResult(result);
-            queryResults[queryInfo.key] = parsedResult;
+            const { raw, parsed, usedParam } = await this.callSqlWithFallback(sqlTool, queryInfo.query);
+            queryResults[queryInfo.key] = parsed;
             console.log(`[PlanAgent] Specific query ${queryInfo.type} successful:`, {
-              resultType: typeof result,
-              isArray: Array.isArray(result),
-              length: Array.isArray(result) ? result.length : 'N/A'
+              usedParam,
+              resultType: typeof raw,
+              isArray: Array.isArray(parsed),
+              length: Array.isArray(parsed) ? parsed.length : 'N/A'
             });
           } catch (error) {
             console.error(`[PlanAgent] Specific query ${queryInfo.type} failed:`, error);
@@ -267,12 +299,16 @@ export class PlanAgent extends BaseAgent {
       // 默认的基础schema查询（首次查询或无特定请求时）
       console.log('[PlanAgent] Executing basic schema queries...');
       const dbAdapter = getDatabaseAdapter();
+      console.log(`[PlanAgent] Using database adapter for type: ${dbAdapter.constructor.name}`);
+      
       const schemaQueries = [
         // 动态生成的表查询
         dbAdapter.getTableListQuery(),
         // 动态生成的列查询
         dbAdapter.getColumnInfoQuery()
       ];
+      
+      console.log(`[PlanAgent] Generated queries:`, schemaQueries);
 
       let querySuccessCount = 0;
       for (let i = 0; i < schemaQueries.length; i++) {
@@ -281,22 +317,31 @@ export class PlanAgent extends BaseAgent {
         
         try {
           console.log(`[PlanAgent] Executing ${queryType} query: ${query}`);
-          const result = await sqlTool.call({ sql: query });
-          const parsedResult = this.parseSqlResult(result);
-          queryResults[queryType] = parsedResult;
+          const { raw, parsed, usedParam } = await this.callSqlWithFallback(sqlTool, query);
+          console.log(`[PlanAgent] Raw ${queryType} query result:`, {
+            usedParam,
+            type: typeof raw,
+            isString: typeof raw === 'string',
+            content: typeof raw === 'string' ? raw.substring(0, 200) + '...' : raw
+          });
+
+          queryResults[queryType] = parsed;
           querySuccessCount++;
-          
+
           console.log(`[PlanAgent] ${queryType} query successful:`, {
-            resultType: typeof result,
-            isArray: Array.isArray(result),
-            length: Array.isArray(result) ? result.length : 'N/A',
-            sample: Array.isArray(result) && result.length > 0 ? result[0] : result
+            usedParam,
+            resultType: typeof raw,
+            parsedType: typeof parsed,
+            isArray: Array.isArray(parsed),
+            length: Array.isArray(parsed) ? parsed.length : 'N/A',
+            sample: Array.isArray(parsed) && parsed.length > 0 ? parsed[0] : parsed
           });
         } catch (error) {
           console.error(`[PlanAgent] ${queryType} query failed:`, {
             query,
             error: error instanceof Error ? error.message : String(error),
-            stack: error instanceof Error ? error.stack : undefined
+            stack: error instanceof Error ? error.stack : undefined,
+            databaseUrl: process.env.TEST_DATABASE_URL ? 'configured' : 'not configured'
           });
           queryResults[`${queryType}_error`] = error instanceof Error ? error.message : String(error);
         }
@@ -308,10 +353,9 @@ export class PlanAgent extends BaseAgent {
         try {
           const simpleQuery = dbAdapter.getSimpleTableListQuery();
           console.log(`[PlanAgent] Executing simple query: ${simpleQuery}`);
-          const result = await sqlTool.call({ sql: simpleQuery });
-          const parsedResult = this.parseSqlResult(result);
-          queryResults.tables_simple = parsedResult;
-          console.log('[PlanAgent] Simple table query successful:', result);
+          const { raw, parsed, usedParam } = await this.callSqlWithFallback(sqlTool, simpleQuery);
+          queryResults.tables_simple = parsed;
+          console.log('[PlanAgent] Simple table query successful:', { usedParam, type: typeof raw });
         } catch (error) {
           console.error('[PlanAgent] Even simple table query failed:', error);
           queryResults.connection_error = error instanceof Error ? error.message : String(error);
@@ -328,13 +372,13 @@ export class PlanAgent extends BaseAgent {
             try {
               console.log(`[PlanAgent] Getting sample data from table: ${tableName}`);
               const sampleQuery = dbAdapter.getSampleDataQuery(tableName, 5);
-              const sampleResult = await sqlTool.call({ sql: sampleQuery });
-              const parsedSampleResult = this.parseSqlResult(sampleResult);
-              queryResults[`sample_${tableName}`] = parsedSampleResult;
+              const { raw, parsed, usedParam } = await this.callSqlWithFallback(sqlTool, sampleQuery);
+              queryResults[`sample_${tableName}`] = parsed;
               console.log(`[PlanAgent] Sample data from ${tableName}:`, {
-                resultType: typeof sampleResult,
-                isArray: Array.isArray(sampleResult),
-                length: Array.isArray(sampleResult) ? sampleResult.length : 'N/A'
+                usedParam,
+                resultType: typeof raw,
+                isArray: Array.isArray(parsed),
+                length: Array.isArray(parsed) ? parsed.length : 'N/A'
               });
             } catch (error) {
               console.warn(`[PlanAgent] Failed to get sample data from ${tableName}:`, error instanceof Error ? error.message : String(error));
@@ -1086,6 +1130,11 @@ Example output format (using real database values):
         const lastPlan = state.generatedPlans[state.generatedPlans.length - 1];
         if (lastPlan && state.currentTool && lastPlan.toolName === state.currentTool.name) {
           console.log(`[PlanAgent] Plan already generated for tool ${state.currentTool.name}, routing to next-tool-node`);
+          // 计划生成完成后，递增工具索引并清空当前工具
+          const nextIndex = (currentToolIndex ?? 0) + 1;
+          // 更新状态并路由到next-tool-node
+          state.currentToolIndex = nextIndex;
+          state.currentTool = null;
           return "next-tool-node";
         }
       }
@@ -1180,15 +1229,25 @@ Example output format (using real database values):
         currentToolIndex = 0;
       }
 
-      // 设置当前工具
-      const currentIndex = currentToolIndex ?? 0;
+      // 设置当前工具（跳过已生成计划的工具，并持久化索引）
+      let currentIndex = currentToolIndex ?? 0;
+
+      // 如果已有生成的计划，跳过已处理过的工具
+      const plannedNames = Array.isArray(state.generatedPlans)
+        ? new Set(state.generatedPlans.map((p: any) => p?.toolName))
+        : new Set<string>();
+
+      while (currentIndex < toolsList.length && plannedNames.has(toolsList[currentIndex].name)) {
+        currentIndex++;
+      }
+
       if (currentIndex < toolsList.length) {
         const currentTool = toolsList[currentIndex];
         console.log(`[PlanAgent] Setting current tool to: ${currentTool.name} (index: ${currentIndex})`);
-        
+
         return {
           currentTool,
-          currentToolIndex: currentIndex + 1, // 为下次调用准备
+          currentToolIndex: currentIndex, // 持久化最新索引，避免回退到0
           toolsList,
           batchInfo
         };
@@ -1196,6 +1255,7 @@ Example output format (using real database values):
         console.log('[PlanAgent] No more tools in current batch');
         return {
           currentTool: null,
+          currentToolIndex: currentIndex,
           toolsList,
           batchInfo
         };
@@ -1286,6 +1346,6 @@ Example output format (using real database values):
       // store 配置通过 LangGraph 运行时传递
       interruptBefore: [],
       interruptAfter: [],
-    }).withConfig({ recursionLimit: 256 });
+    }).withConfig({ recursionLimit: 1000 });
   }
 }

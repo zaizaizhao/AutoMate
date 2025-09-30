@@ -18,7 +18,7 @@ START → plan-node → takeActionOrGeneratePlan → [plan-node | END]
 
 1. **ReactAgent 使用**：
    - 使用 `createReactAgent` 创建具有工具调用能力的代理
-   - 集成了 PostgreSQL 数据库工具 (`postgresql-hub`)
+   - 集成了 PostgreSQL 数据库工具 (`sql-hub`)
    - 通过提示词指导 LLM 进行两阶段工作：数据查询 → 计划生成
 
 2. **批量生成机制**：
@@ -173,7 +173,7 @@ const planReactAgent = await createReactAgent({
 
 // 优化方式（可控）
 const dbTools = await getPostgresqlHubTools();
-const sqlTool = dbTools.find(tool => tool.name === 'postgresql-hub');
+const sqlTool = dbTools.find(tool => tool.name === 'sql-hub');
 const queryResult = await sqlTool.invoke({
   query: constructedQuery
 });

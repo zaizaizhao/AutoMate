@@ -62,12 +62,12 @@ You are an expert system analyst responsible for evaluating the success or failu
 #### STEP 2.5: DATABASE VERIFICATION (When Required)
 **Database Verification Required**: {isRequiredValidateByDatabase}
 
-When isRequiredValidateByDatabase is true, you MUST perform database verification using postgresql-hub tool:
+When isRequiredValidateByDatabase is true, you MUST perform database verification using sql-hub tool:
 
 **Database Verification Process**:
 1. **Identify Verification Needs**: Determine what database state should be verified
 2. **Construct Verification Queries**: Prepare SQL queries to check expected data state
-3. **Call postgresql-hub Tool**: Use the tool to execute verification queries
+3. **Call sql-hub Tool**: Use the tool to execute verification queries
 4. **Analyze Database Results**: Compare actual vs expected database state
 5. **Integrate with Overall Assessment**: Factor database verification results into final evaluation
 
@@ -117,7 +117,7 @@ For failures, provide actionable remediation suggestions:
 - Parameter corrections or adjustments
 - Retry strategies with modified conditions
 - Alternative tool or approach recommendations
-- **Database Verification**: Use postgresql-hub tool to verify actual database state
+- **Database Verification**: Use sql-hub tool to verify actual database state
 - **Data Cleanup**: Remove inconsistent or corrupted data entries
 - **Transaction Rollback**: Manually rollback incomplete transactions if needed
 

@@ -68,7 +68,7 @@ export class MCPCallDetector {
   }
 
   /**
-   * 检查postgresql-hub工具是否被调用
+   * 检查sql-hub工具是否被调用
    */
   checkPostgresqlHubCalls(): {
     hasCalls: boolean;
@@ -76,7 +76,7 @@ export class MCPCallDetector {
     recentCalls: any[];
     lastCallTime?: Date;
   } {
-    const postgresqlCalls = mcpCallMonitor.getCallHistory('postgresql-hub');
+    const postgresqlCalls = mcpCallMonitor.getCallHistory('sql-hub');
     
     return {
       hasCalls: postgresqlCalls.length > 0,
@@ -119,7 +119,7 @@ export class MCPCallDetector {
    */
   generateReport(): string {
     const stats = mcpCallMonitor.getCallStats();
-    const postgresqlStats = mcpCallMonitor.getCallStats('postgresql-hub');
+    const postgresqlStats = mcpCallMonitor.getCallStats('sql-hub');
     const recentCalls = mcpCallMonitor.getRecentCalls(10);
     
     let report = '=== MCP工具调用报告 ===\n\n';
@@ -130,7 +130,7 @@ export class MCPCallDetector {
     report += `  - 失败调用: ${stats.failedCalls}\n`;
     report += `  - 平均耗时: ${stats.averageDuration.toFixed(2)}ms\n\n`;
     
-    report += `PostgreSQL-Hub统计:\n`;
+    report += `sql-hub统计:\n`;
     report += `  - 调用次数: ${postgresqlStats.totalCalls}\n`;
     report += `  - 成功率: ${postgresqlStats.totalCalls > 0 ? ((postgresqlStats.successfulCalls / postgresqlStats.totalCalls) * 100).toFixed(1) : 0}%\n\n`;
     
@@ -217,12 +217,12 @@ export const mcpCallDetector = new MCPCallDetector();
 export const realTimeMCPMonitor = new RealTimeMCPMonitor();
 
 /**
- * 便捷函数：检查postgresql-hub是否被调用
+ * 便捷函数：检查sql-hub是否被调用
  */
 export function checkPostgresqlHubActivity(): void {
   const result = mcpCallDetector.checkPostgresqlHubCalls();
   
-  console.log('=== PostgreSQL-Hub 调用检查 ===');
+  console.log('=== sql-hub 调用检查 ===');
   console.log(`是否有调用: ${result.hasCalls ? '✅ 是' : '❌ 否'}`);
   console.log(`调用次数: ${result.callCount}`);
   
