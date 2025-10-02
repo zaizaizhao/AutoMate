@@ -4,21 +4,21 @@ import {
   START,
   StateGraph,
 } from "@langchain/langgraph";
-
-
-
 import { BaseAgent, AgentConfig } from "../../BaseAgent/BaseAgent.js";
-import { getDatabaseAdapter } from "./DatabaseAdapter.js";
+import { getDatabaseAdapter } from "./Utils/DatabaseAdapter.js";
 import { AIMessage } from "@langchain/core/messages";
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
 import { getPostgresqlHubTools, getTestServerTools } from "../../mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
 import { PlanAgentAnnotation } from "./State/State.js";
+import { buildDataAssessmentPrompt } from "./Prompts/Prompts.js";
+import { parseJsonFromLLMResponse, parseSqlResult } from "./Utils/Utils.js";
+import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
-// ReactAgent已被新架构替代，不再需要导入
+
 export class PlanAgent extends BaseAgent {
-  private llm: any;
+  private llm: BaseChatModel ;
   // 记录最近一次运行的 thread_id，供路由函数读取批次进度
   private lastThreadId: string | null = null;
 
@@ -29,30 +29,6 @@ export class PlanAgent extends BaseAgent {
   protected async initializellm() {
     this.llm = await loadChatModel("openai/moonshotai/Kimi-K2-Instruct");
   }
-
-  /**
-   * 解析SQL查询结果 - 处理JSON字符串格式的响应
-   * @param result SQL工具返回的结果
-   * @returns 解析后的数据或原始结果
-   */
-  private parseSqlResult(result: any): any {
-    if (typeof result === 'string') {
-      try {
-        const parsed = JSON.parse(result);
-        // 如果解析成功且有success和data字段，返回data中的rows
-        if (parsed && typeof parsed === 'object' && parsed.success && parsed.data) {
-          return parsed.data.rows || parsed.data;
-        }
-        // 否则返回整个解析结果
-        return parsed;
-      } catch (error) {
-        console.warn('[PlanAgent] Failed to parse SQL result as JSON:', error);
-        return result;
-      }
-    }
-    return result;
-  }
-
   /**
    * 调用 SQL 工具，兼容不同参数键名（sql | query）并统一解析返回
    */
@@ -63,7 +39,7 @@ export class PlanAgent extends BaseAgent {
     // 优先尝试 { sql }
     try {
       const raw1 = await sqlTool.call({ sql: query });
-      const parsed1 = this.parseSqlResult(raw1);
+      const parsed1 = parseSqlResult(raw1);
       // 如果解析后为数组或含 rows，则认为成功
       const ok1 = Array.isArray(parsed1) || (parsed1 && typeof parsed1 === 'object' && Array.isArray((parsed1 as any).rows));
       if (ok1) {
@@ -76,7 +52,7 @@ export class PlanAgent extends BaseAgent {
 
     try {
       const raw2 = await sqlTool.call({ query });
-      const parsed2 = this.parseSqlResult(raw2);
+      const parsed2 = parseSqlResult(raw2);
       const result2 = Array.isArray(parsed2) ? parsed2 : (parsed2 && (parsed2 as any).rows);
       return { raw: raw2, parsed: result2 ?? parsed2, usedParam: 'query' };
     } catch (e2) {
@@ -127,15 +103,12 @@ export class PlanAgent extends BaseAgent {
       // 获取数据库MCP工具
       console.log('[PlanAgent] Attempting to get database tools...');
       const dbTools = await getPostgresqlHubTools();
-      console.log(`[PlanAgent] Database tools obtained: ${dbTools?.length || 0} tools`);
-      
       if (dbTools && dbTools.length > 0) {
         console.log('[PlanAgent] Available database tools:', dbTools.map(tool => ({ name: tool.name, description: tool.description })));
       }
 
       if (!dbTools || dbTools.length === 0) {
-        console.error('[PlanAgent] No database tools available - this may indicate MCP server connection issues');
-        console.error('[PlanAgent] Please check:');
+        console.error('[PlanAgent] No database tools available - this may indicate MCP server connection issues Please check:');
         console.error('[PlanAgent] 1. MCP server is running');
         console.error('[PlanAgent] 2. TEST_DATABASE_URL is correctly configured');
         console.error('[PlanAgent] 3. Database connection is accessible');
@@ -195,7 +168,6 @@ export class PlanAgent extends BaseAgent {
       console.log('[PlanAgent] Executing basic schema queries...');
       const dbAdapter = getDatabaseAdapter();
       console.log(`[PlanAgent] Using database adapter for type: ${dbAdapter.constructor.name}`);
-      
       const schemaQueries = [
         // 动态生成的表查询
         dbAdapter.getTableListQuery(),
@@ -211,18 +183,9 @@ export class PlanAgent extends BaseAgent {
         const queryType = i === 0 ? 'tables' : 'columns';
         
         try {
-          console.log(`[PlanAgent] Executing ${queryType} query: ${query}`);
           const { raw, parsed, usedParam } = await this.callSqlWithFallback(sqlTool, query);
-          console.log(`[PlanAgent] Raw ${queryType} query result:`, {
-            usedParam,
-            type: typeof raw,
-            isString: typeof raw === 'string',
-            content: typeof raw === 'string' ? raw.substring(0, 200) + '...' : raw
-          });
-
           queryResults[queryType] = parsed;
           querySuccessCount++;
-
           console.log(`[PlanAgent] ${queryType} query successful:`, {
             usedParam,
             resultType: typeof raw,
@@ -324,7 +287,7 @@ export class PlanAgent extends BaseAgent {
   }
 
   /**
-   * 计划生成节点 - 增强版，支持LLM驱动的数据充分性评估
+   * 计划生成节点支持LLM驱动的数据充分性评估
    * 
    * 工作流程：
    * 1. 获取当前状态和数据
@@ -347,45 +310,34 @@ export class PlanAgent extends BaseAgent {
   ): Promise<Partial<typeof PlanAgentAnnotation.State>> {
     const threadId = (config?.configurable as any)?.thread_id ?? this.lastThreadId ?? "default";
     console.log(`[PlanAgent] PlanGenerationNode started for threadId: ${threadId}`);
-
     try {
       // 确保LLM已初始化
       if (!this.llm) {
         console.log('[PlanAgent] LLM not initialized, initializing now...');
         await this.initializellm();
-        if (!this.llm) {
-          console.error('[PlanAgent] Failed to initialize LLM');
-          return { generatedPlans: [] };
-        }
       }
 
       const { currentTool, queryResults, batchInfo, currentToolIndex, queryRound, dataQueryRequest } = state;
-      
       if (!currentTool) {
         console.warn('[PlanAgent] No current tool specified');
         return { generatedPlans: [] };
       }
 
       console.log(`[PlanAgent] Generating plan for tool: ${currentTool.name}, Query Round: ${queryRound || 0}`);
-
       // 根据工具schema动态查询相关的真实数据
       const enhancedQueryResults = await this.enhanceQueryResultsForTool(currentTool, queryResults || {});
-
       // 第一步：LLM评估数据充分性
       const dataAssessment = await this.assessDataSufficiency(currentTool, enhancedQueryResults, queryRound || 0);
       console.log(`[PlanAgent] Data assessment for ${currentTool.name}:`, dataAssessment);
-
       // 如果数据不足且未达到最大查询轮次，请求更多数据
       if (!dataAssessment.isDataSufficient && (queryRound || 0) < 8) {
         console.log(`[PlanAgent] Data insufficient for ${currentTool.name}, requesting additional data`);
-        
         const queryRequest = {
           needsMoreData: true,
           missingData: dataAssessment.missingData,
           reason: dataAssessment.assessmentReason,
           confidence: dataAssessment.confidence
         };
-
         return {
           dataAssessment,
           dataQueryRequest: queryRequest,
@@ -402,30 +354,20 @@ export class PlanAgent extends BaseAgent {
 
       // 数据充分，继续生成计划
       console.log(`[PlanAgent] Data sufficient for ${currentTool.name}, proceeding with plan generation`);
-      
       // 构建针对单个工具的提示词
       const toolPrompt = this.buildSingleToolPrompt(currentTool, enhancedQueryResults, batchInfo, currentToolIndex);
-      
       // 直接调用LLM生成单个工具的测试计划
       const response = await this.llm.invoke([
         { role: "system", content: toolPrompt },
         { role: "user", content: `Generate a test task for the tool "${currentTool.name}" using the provided real database data. Return a valid JSON object with the task details.` }
       ]);
-
+      
       console.log(`[PlanAgent] LLM response for ${currentTool.name}:`, response);
-
       // 解析LLM响应
       let parsedPlan = null;
       try {
-        const content = response.content || response;
-        let text = typeof content === 'string' ? content : JSON.stringify(content);
-        
-        // 去除markdown代码块
-        text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1").trim();
-        
-        // 尝试解析JSON
-        parsedPlan = JSON.parse(text);
-        
+        // 使用工具函数解析LLM响应中的JSON
+        parsedPlan = parseJsonFromLLMResponse(response);
         // 确保包含必要字段
         if (parsedPlan && typeof parsedPlan === 'object') {
           parsedPlan.toolName = parsedPlan.toolName || currentTool.name;
@@ -524,38 +466,8 @@ export class PlanAgent extends BaseAgent {
     confidence: number;
   }> {
     try {
-      const toolSchema = tool?.schema ?? tool?.input_schema ?? tool?.parametersSchema ?? {};
-      const properties = toolSchema.properties || {};
-      
       // 构建数据评估提示词
-      const assessmentPrompt = `You are a data sufficiency analyst. Evaluate whether the provided database data is sufficient to generate a meaningful test task for the given tool.
-
-TOOL INFORMATION:
-Name: ${tool.name}
-Description: ${tool.description || 'No description'}
-Parameters: ${JSON.stringify(properties, null, 2)}
-
-AVAILABLE DATA:
-${JSON.stringify(queryResults, null, 2)}
-
-CURRENT QUERY ROUND: ${currentRound}
-
-EVALUATION CRITERIA:
-1. Are there sufficient real data records to populate tool parameters?
-2. Do the available data types match the tool's parameter requirements?
-3. Is there enough variety in the data for meaningful testing?
-4. Are there any critical missing data types that would prevent effective testing?
-
-RETURN A JSON OBJECT WITH:
-{
-  "isDataSufficient": boolean,
-  "missingData": ["list of missing data types or tables"],
-  "assessmentReason": "detailed explanation of the assessment",
-  "confidence": number (0-1, confidence in the assessment)
-}
-
-Be strict in your assessment - only mark as sufficient if you can generate a realistic, meaningful test with actual data.`;
-
+      const assessmentPrompt = buildDataAssessmentPrompt(tool, queryResults, currentRound);
       const response = await this.llm.invoke([
         { role: "system", content: assessmentPrompt },
         { role: "user", content: "Evaluate the data sufficiency for this tool. Return only the JSON assessment." }
@@ -564,10 +476,8 @@ Be strict in your assessment - only mark as sufficient if you can generate a rea
       // 解析LLM响应
       let assessment = null;
       try {
-        const content = response.content || response;
-        let text = typeof content === 'string' ? content : JSON.stringify(content);
-        text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, "$1").trim();
-        assessment = JSON.parse(text);
+        // 使用工具函数解析LLM响应中的JSON
+        assessment = parseJsonFromLLMResponse(response);
       } catch (parseError) {
         console.warn('[PlanAgent] Failed to parse data assessment, using fallback');
         // 基于简单规则的fallback评估
@@ -721,7 +631,7 @@ Be strict in your assessment - only mark as sufficient if you can generate a rea
           if (query) {
             console.log(`[PlanAgent] Executing targeted query for ${need.type}:`, query);
             const result = await sqlTool.call({ sql: query });
-            const parsedResult = this.parseSqlResult(result);
+            const parsedResult = parseSqlResult(result);
             enhancedResults[`targeted_${need.type}`] = parsedResult;
             console.log(`[PlanAgent] Enhanced data for ${need.type}:`, {
               resultType: typeof result,
