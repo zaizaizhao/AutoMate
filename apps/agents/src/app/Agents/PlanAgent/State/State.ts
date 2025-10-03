@@ -106,6 +106,7 @@ export const PlanAgentAnnotation = Annotation.Root({
     missingData: string[];     // 缺失的数据类型
     assessmentReason: string;  // 评估理由
     confidence: number;        // 评估置信度
+    targetTables: string[];    // LLM推荐的目标表名列表
   } | null>({
     reducer: (x, y) => y ?? x ?? null,
     default: () => null,

@@ -128,7 +128,7 @@ export class PlanAgent extends BaseAgent {
       // 如果有特定的数据查询请求，执行目标查询
       if (dataQueryRequest && dataQueryRequest.needsMoreData && dataQueryRequest.missingData) {
         console.log('[PlanAgent] Executing specific data queries based on LLM request...');
-        const specificQueries = this.buildSpecificQueries(dataQueryRequest.missingData);
+        const specificQueries = this.buildSpecificQueries(dataQueryRequest.missingData, state.currentTool, state.dataAssessment?.targetTables);
         
         for (const queryInfo of specificQueries) {
           try {
@@ -464,6 +464,7 @@ export class PlanAgent extends BaseAgent {
     missingData: string[];
     assessmentReason: string;
     confidence: number;
+    targetTables: string[];
   }> {
     try {
       // 构建数据评估提示词
@@ -490,7 +491,8 @@ export class PlanAgent extends BaseAgent {
           isDataSufficient: hasData && currentRound >= 1,
           missingData: hasData ? [] : ['sample_data', 'table_records'],
           assessmentReason: hasData ? 'Basic data available' : 'No meaningful data found',
-          confidence: 0.6
+          confidence: 0.6,
+          targetTables: []
         };
       }
 
@@ -500,7 +502,8 @@ export class PlanAgent extends BaseAgent {
         missingData: Array.isArray(assessment?.missingData) ? assessment.missingData : [],
         assessmentReason: assessment?.assessmentReason || 'Assessment failed',
         confidence: typeof assessment?.confidence === 'number' ? 
-          Math.max(0, Math.min(1, assessment.confidence)) : 0.5
+          Math.max(0, Math.min(1, assessment.confidence)) : 0.5,
+        targetTables: Array.isArray(assessment?.targetTables) ? assessment.targetTables : []
       };
     } catch (error) {
       console.error('[PlanAgent] Data assessment error:', error);
@@ -508,72 +511,128 @@ export class PlanAgent extends BaseAgent {
         isDataSufficient: currentRound >= 2, // 默认2轮后认为充分
         missingData: ['assessment_failed'],
         assessmentReason: 'Assessment process failed, using fallback logic',
-        confidence: 0.3
+        confidence: 0.3,
+        targetTables: []
       };
     }
   }
 
   /**
-   * 根据LLM评估的缺失数据构建通用的数据库发现查询
+   * 根据LLM评估的缺失数据构建智能的数据库发现查询
    * 
-   * 采用动态发现策略，不依赖特定表名：
-   * - schema_info: 获取数据库结构信息
-   * - table_samples: 获取各表的样本数据
-   * - relationships: 获取表间关系信息
-   * - data_types: 获取列数据类型信息
+   * 增强功能：
+   * 1. LLM表名推荐优先：优先使用LLM推荐的具体表名进行查询
+   * 2. 智能表匹配：根据当前工具提取相关表名，作为备选方案
+   * 3. 关键词匹配机制：与 buildDataAssessmentPrompt 中的关键词约束严格对应
+   * 4. 目标查询：针对特定表生成样本数据查询，而不是查询所有表
+   * 5. Fallback机制：如果没有匹配到相关表，使用通用查询
+   * 
+   * 支持的关键词分类：
+   * 1. 数据库结构类：'schema', 'structure', 'table' -> 获取表结构和元数据
+   * 2. 样本数据类：'sample', 'data', 'record' -> 获取实际数据记录（智能匹配相关表）
+   * 3. 表关系类：'relationship', 'foreign', 'reference' -> 获取表间关系信息
+   * 4. 约束键类：'constraint', 'key' -> 获取约束和键信息
    * 
    * 每个查询包含：
    * - type: 数据类型标识
    * - query: 具体的SQL查询语句
    * - key: 结果存储的键名
    * 
-   * @param missingData LLM识别的缺失数据类型列表
+   * @param missingData LLM识别的缺失数据类型列表（使用标准化关键词）
+   * @param currentTool 当前正在处理的工具（用于智能表匹配）
+   * @param llmRecommendedTables LLM推荐的具体表名列表（优先级最高）
    * @returns 结构化的查询定义数组
    */
-  private buildSpecificQueries(missingData: string[]): Array<{type: string, query: string, key: string}> {
+  private buildSpecificQueries(missingData: string[], currentTool?: any, llmRecommendedTables?: string[]): Array<{type: string, query: string, key: string}> {
     const queries: Array<{type: string, query: string, key: string}> = [];
     const dbAdapter = getDatabaseAdapter();
     
-    for (const missing of missingData) {
-      const missingLower = missing.toLowerCase();
+    // 标准化和验证关键词
+    const standardizedKeywords = this.standardizeKeywords(missingData);
+    console.log(`[PlanAgent] Standardized keywords:`, standardizedKeywords);
+    
+    // 确定目标表名的优先级策略：
+    // 1. 优先使用LLM推荐的具体表名（最高优先级）
+    // 2. 备选使用从工具中提取的表名关键词
+    let targetTableKeywords: string[] = [];
+    
+    if (llmRecommendedTables && llmRecommendedTables.length > 0) {
+      targetTableKeywords = llmRecommendedTables;
+      console.log(`[PlanAgent] Using LLM recommended tables (highest priority):`, targetTableKeywords);
+    } else if (currentTool) {
+      targetTableKeywords = this.extractTableNamesFromTool(currentTool);
+      console.log(`[PlanAgent] Using extracted table keywords for tool "${currentTool.name}" (fallback):`, targetTableKeywords);
+    }
+    
+    for (const missing of standardizedKeywords) {
+      const missingLower = missing.toLowerCase().trim();
       
-      // 根据缺失数据类型构建通用发现查询
-       if (missingLower.includes('schema') || missingLower.includes('structure') || missingLower.includes('table')) {
-         // 数据库结构信息 - 使用适配器
-         queries.push({
-           type: 'schema_info', 
-           query: dbAdapter.getTableListQuery(), 
-           key: 'schema_tables'
-         });
+      // 精确关键词匹配 - 与 Prompts.ts 中的约束严格对应
+      if (missingLower === 'schema' || missingLower === 'structure' || missingLower === 'table') {
+         // 数据库结构信息类 - 获取表结构和元数据
+         console.log(`[PlanAgent] Matched DATABASE STRUCTURE keyword: "${missing}"`);
+         
+         if (targetTableKeywords.length > 0) {
+           // 优先查询相关表的结构信息
+           queries.push({
+             type: 'targeted_table_info', 
+             query: dbAdapter.getTargetedTableInfoQuery(targetTableKeywords), 
+             key: 'targeted_tables'
+           });
+         } else {
+           // Fallback到通用表查询
+           queries.push({
+             type: 'schema_info', 
+             query: dbAdapter.getTableListQuery(), 
+             key: 'schema_tables'
+           });
+         }
+         
          queries.push({
            type: 'column_info', 
            query: dbAdapter.getColumnInfoQuery(), 
            key: 'schema_columns'
          });
-       } else if (missingLower.includes('sample') || missingLower.includes('data') || missingLower.includes('record')) {
-         // 样本数据 - 先获取表列表，然后动态查询
-         queries.push({
-           type: 'table_discovery', 
-           query: dbAdapter.getTableListQuery(), 
-           key: 'available_tables'
-         });
-       } else if (missingLower.includes('relationship') || missingLower.includes('foreign') || missingLower.includes('reference')) {
-         // 表关系信息 - 使用适配器
+       } else if (missingLower === 'sample' || missingLower === 'data' || missingLower === 'record') {
+         // 样本数据类 - 智能获取相关表的实际数据记录
+         console.log(`[PlanAgent] Matched SAMPLE DATA keyword: "${missing}"`);
+         
+         if (targetTableKeywords.length > 0) {
+           // 优先查询相关表的样本数据
+           console.log(`[PlanAgent] Using targeted sample data query for tables matching:`, targetTableKeywords);
+           queries.push({
+             type: 'targeted_sample_data', 
+             query: dbAdapter.getTargetedSampleDataQuery(targetTableKeywords, 3), 
+             key: 'targeted_sample_data'
+           });
+         } else {
+           // Fallback到通用表发现查询
+           console.log(`[PlanAgent] No target tables found, using generic table discovery`);
+           queries.push({
+             type: 'table_discovery', 
+             query: dbAdapter.getTableListQuery(), 
+             key: 'available_tables'
+           });
+         }
+       } else if (missingLower === 'relationship' || missingLower === 'foreign' || missingLower === 'reference') {
+         // 表关系类 - 获取表间关系信息
+         console.log(`[PlanAgent] Matched TABLE RELATIONSHIP keyword: "${missing}"`);
          queries.push({
            type: 'relationships', 
            query: dbAdapter.getForeignKeyQuery(), 
            key: 'table_relationships'
          });
-       } else if (missingLower.includes('constraint') || missingLower.includes('key')) {
-         // 约束和键信息 - 使用适配器
+       } else if (missingLower === 'constraint' || missingLower === 'key') {
+         // 约束键类 - 获取约束和键信息
+         console.log(`[PlanAgent] Matched CONSTRAINT/KEY keyword: "${missing}"`);
          queries.push({
            type: 'constraints', 
            query: dbAdapter.getConstraintsQuery(), 
            key: 'table_constraints'
          });
        } else {
-         // 对于其他描述性文本，使用通用的数据库概览查询
-         console.log(`[PlanAgent] Using generic database overview for: "${missing}"`);
+         // 未识别的关键词 - 使用通用数据库概览查询作为fallback
+         console.warn(`[PlanAgent] Unrecognized keyword: "${missing}", using generic database overview`);
          queries.push({
            type: 'database_overview', 
            query: dbAdapter.getDatabaseOverviewQuery(), 
@@ -582,8 +641,9 @@ export class PlanAgent extends BaseAgent {
        }
     }
     
-    // 如果没有特定查询，添加基础的数据库发现查询
+    // 如果没有生成任何特定查询，添加基础的数据库发现查询
      if (queries.length === 0) {
+       console.log(`[PlanAgent] No specific queries generated, adding basic discovery queries`);
        queries.push({
          type: 'basic_discovery', 
          query: dbAdapter.getTableListQuery(), 
@@ -597,6 +657,197 @@ export class PlanAgent extends BaseAgent {
      }
     
     return queries;
+  }
+
+  /**
+   * 标准化和验证LLM返回的关键词
+   * 
+   * 确保关键词符合预期格式，移除多余的空格和特殊字符，
+   * 并验证是否为支持的关键词类型。
+   * 
+   * @param missingData 原始的缺失数据类型数组
+   * @returns 标准化后的关键词数组
+   */
+  private standardizeKeywords(missingData: string[]): string[] {
+    const validKeywords = [
+      // 数据库结构类
+      'schema', 'structure', 'table',
+      // 样本数据类  
+      'sample', 'data', 'record',
+      // 表关系类
+      'relationship', 'foreign', 'reference',
+      // 约束键类
+      'constraint', 'key'
+    ];
+    
+    const standardized: string[] = [];
+    
+    for (const item of missingData) {
+      if (!item || typeof item !== 'string') {
+        console.warn(`[PlanAgent] Invalid missing data item:`, item);
+        continue;
+      }
+      
+      const cleaned = item.toLowerCase().trim();
+      
+      // 检查是否为有效关键词
+      if (validKeywords.includes(cleaned)) {
+        standardized.push(cleaned);
+      } else {
+        // 尝试从复合词中提取有效关键词
+        const extracted = this.extractValidKeywords(cleaned, validKeywords);
+        if (extracted.length > 0) {
+          standardized.push(...extracted);
+          console.log(`[PlanAgent] Extracted keywords from "${item}":`, extracted);
+        } else {
+          console.warn(`[PlanAgent] No valid keywords found in: "${item}"`);
+          // 保留原始值，让后续处理决定如何处理
+          standardized.push(cleaned);
+        }
+      }
+    }
+    
+    // 去重
+    return [...new Set(standardized)];
+  }
+
+  /**
+   * 从复合词或描述性文本中提取有效关键词
+   * 
+   * @param text 输入文本
+   * @param validKeywords 有效关键词列表
+   * @returns 提取到的有效关键词数组
+   */
+  private extractValidKeywords(text: string, validKeywords: string[]): string[] {
+    const extracted: string[] = [];
+    
+    for (const keyword of validKeywords) {
+      if (text.includes(keyword)) {
+        extracted.push(keyword);
+      }
+    }
+    
+    return extracted;
+  }
+
+  /**
+   * 从tool的名称、描述和schema中提取可能的表名关键词
+   * 
+   * 支持的提取策略：
+   * 1. 从tool名称中提取（如 createOrder -> order, orders）
+   * 2. 从tool描述中提取表名相关词汇
+   * 3. 从schema参数名中提取（如 orderId -> order）
+   * 4. 支持单复数转换和常见命名模式
+   * 
+   * @param tool 工具对象，包含name、description和schema
+   * @returns 提取到的表名关键词数组
+   */
+  private extractTableNamesFromTool(tool: any): string[] {
+    const tableKeywords: Set<string> = new Set();
+    
+    // 1. 从tool名称中提取
+    if (tool.name) {
+      const nameKeywords = this.extractKeywordsFromText(tool.name);
+      nameKeywords.forEach(keyword => {
+        tableKeywords.add(keyword);
+        // 添加单复数变体
+        const variants = this.generateTableNameVariants(keyword);
+        variants.forEach(variant => tableKeywords.add(variant));
+      });
+    }
+    
+    // 2. 从tool描述中提取
+    if (tool.description) {
+      const descKeywords = this.extractKeywordsFromText(tool.description);
+      descKeywords.forEach(keyword => {
+        const variants = this.generateTableNameVariants(keyword);
+        variants.forEach(variant => tableKeywords.add(variant));
+      });
+    }
+    
+    // 3. 从schema参数名中提取
+    const schema = tool?.schema ?? tool?.input_schema ?? tool?.parametersSchema ?? {};
+    if (schema.properties) {
+      Object.keys(schema.properties).forEach(paramName => {
+        const paramKeywords = this.extractKeywordsFromText(paramName);
+        paramKeywords.forEach(keyword => {
+          const variants = this.generateTableNameVariants(keyword);
+          variants.forEach(variant => tableKeywords.add(variant));
+        });
+      });
+    }
+    
+    const result = Array.from(tableKeywords).filter(keyword => keyword.length > 2);
+    console.log(`[PlanAgent] Extracted table keywords from tool "${tool.name}":`, result);
+    return result;
+  }
+
+  /**
+   * 从文本中提取可能的表名关键词
+   * 
+   * @param text 输入文本
+   * @returns 提取到的关键词数组
+   */
+  private extractKeywordsFromText(text: string): string[] {
+    if (!text) return [];
+    
+    // 移除常见的动词前缀和后缀
+    const cleanText = text
+      .replace(/^(create|get|update|delete|fetch|find|search|list|add|remove|set)_?/i, '')
+      .replace(/_(id|ids|data|info|details|list)$/i, '')
+      .replace(/([A-Z])/g, ' $1') // 驼峰转空格
+      .toLowerCase()
+      .trim();
+    
+    // 分割并过滤关键词
+    return cleanText
+      .split(/[\s_-]+/)
+      .filter(word => word.length > 2)
+      .filter(word => !['the', 'and', 'for', 'with', 'from', 'api', 'tool'].includes(word));
+  }
+
+  /**
+   * 生成表名的各种变体（单复数、常见命名模式）
+   * 
+   * @param keyword 基础关键词
+   * @returns 表名变体数组
+   */
+  private generateTableNameVariants(keyword: string): string[] {
+    const variants: Set<string> = new Set();
+    const lower = keyword.toLowerCase();
+    
+    // 添加原始关键词
+    variants.add(lower);
+    
+    // 单数转复数规则
+    if (!lower.endsWith('s')) {
+      if (lower.endsWith('y')) {
+        variants.add(lower.slice(0, -1) + 'ies'); // category -> categories
+      } else if (lower.endsWith('ch') || lower.endsWith('sh') || lower.endsWith('x') || lower.endsWith('z')) {
+        variants.add(lower + 'es'); // box -> boxes
+      } else {
+        variants.add(lower + 's'); // order -> orders
+      }
+    }
+    
+    // 复数转单数规则
+    if (lower.endsWith('s') && lower.length > 3) {
+      if (lower.endsWith('ies')) {
+        variants.add(lower.slice(0, -3) + 'y'); // categories -> category
+      } else if (lower.endsWith('es')) {
+        variants.add(lower.slice(0, -2)); // boxes -> box
+      } else {
+        variants.add(lower.slice(0, -1)); // orders -> order
+      }
+    }
+    
+    // 常见表名模式
+    variants.add(`${lower}_table`);
+    variants.add(`tbl_${lower}`);
+    variants.add(`${lower}_info`);
+    variants.add(`${lower}_data`);
+    
+    return Array.from(variants);
   }
 
   // 根据工具schema动态查询相关的真实数据
@@ -977,3 +1228,5 @@ Example output format (using real database values):
     }).withConfig({ recursionLimit: 1000 });
   }
 }
+
+// ...

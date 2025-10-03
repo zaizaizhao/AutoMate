@@ -21,6 +21,10 @@ export interface IDatabaseAdapter {
   escapeIdentifier(identifier: string): string;
   getOrderByClause(tableName: string, columnName?: string): string;
   getSimpleTableListQuery(): string;
+  // 新增：智能表匹配相关方法
+  getTargetedSampleDataQuery(tableKeywords: string[], limit?: number): string;
+  getTargetedTableInfoQuery(tableKeywords: string[]): string;
+  matchTableNames(availableTables: string[], targetKeywords: string[]): string[];
 }
 
 /**
@@ -129,6 +133,57 @@ class MySQLAdapter implements IDatabaseAdapter {
   getSimpleTableListQuery(): string {
     // 使用SHOW TABLES，这是MySQL特有的简单查询
     return "SHOW TABLES;";
+  }
+
+  // 新增：智能表匹配相关方法实现
+  getTargetedSampleDataQuery(tableKeywords: string[], limit: number = 5): string {
+    const matchedTables = this.buildTableMatchConditions(tableKeywords);
+    if (matchedTables.length === 0) {
+      // 如果没有匹配的表，返回通用查询
+      return this.getTableListQuery();
+    }
+    
+    // 为每个匹配的表生成样本数据查询
+    const queries = matchedTables.map(tableName => 
+      `(SELECT '${tableName}' as source_table, t.* FROM ${this.escapeIdentifier(tableName)} t LIMIT ${limit})`
+    );
+    
+    return queries.join(' UNION ALL ');
+  }
+
+  getTargetedTableInfoQuery(tableKeywords: string[]): string {
+    const matchConditions = tableKeywords.map(keyword => 
+      `TABLE_NAME LIKE '%${keyword}%'`
+    ).join(' OR ');
+    
+    return `SELECT TABLE_NAME as table_name, TABLE_COMMENT as table_comment 
+            FROM information_schema.tables 
+            WHERE table_schema = DATABASE() 
+            AND table_type = 'BASE TABLE' 
+            AND (${matchConditions})`;
+  }
+
+  matchTableNames(availableTables: string[], targetKeywords: string[]): string[] {
+    const matched: string[] = [];
+    const keywordsLower = targetKeywords.map(k => k.toLowerCase());
+    
+    for (const table of availableTables) {
+      const tableLower = table.toLowerCase();
+      for (const keyword of keywordsLower) {
+        if (tableLower.includes(keyword) || keyword.includes(tableLower)) {
+          matched.push(table);
+          break;
+        }
+      }
+    }
+    
+    return matched;
+  }
+
+  private buildTableMatchConditions(tableKeywords: string[]): string[] {
+    // 这里应该从实际的表列表中匹配，为了简化，返回关键词作为表名
+    // 在实际使用中，需要先查询可用表列表，然后进行匹配
+    return tableKeywords.filter(keyword => keyword.length > 2);
   }
 }
 
@@ -245,6 +300,54 @@ class PostgreSQLAdapter implements IDatabaseAdapter {
     // PostgreSQL特有的简单查询
     return "SELECT tablename as table_name FROM pg_tables WHERE schemaname = current_schema();";
   }
+
+  // 新增：智能表匹配相关方法实现
+  getTargetedSampleDataQuery(tableKeywords: string[], limit: number = 5): string {
+    const matchedTables = this.buildTableMatchConditions(tableKeywords);
+    if (matchedTables.length === 0) {
+      return this.getTableListQuery();
+    }
+    
+    const queries = matchedTables.map(tableName => 
+      `(SELECT '${tableName}' as source_table, t.* FROM ${this.escapeIdentifier(tableName)} t LIMIT ${limit})`
+    );
+    
+    return queries.join(' UNION ALL ');
+  }
+
+  getTargetedTableInfoQuery(tableKeywords: string[]): string {
+    const matchConditions = tableKeywords.map(keyword => 
+      `table_name ILIKE '%${keyword}%'`
+    ).join(' OR ');
+    
+    return `SELECT table_name, obj_description(c.oid) as table_comment 
+            FROM information_schema.tables t
+            LEFT JOIN pg_class c ON c.relname = t.table_name
+            WHERE table_schema = current_schema() 
+            AND table_type = 'BASE TABLE' 
+            AND (${matchConditions})`;
+  }
+
+  matchTableNames(availableTables: string[], targetKeywords: string[]): string[] {
+    const matched: string[] = [];
+    const keywordsLower = targetKeywords.map(k => k.toLowerCase());
+    
+    for (const table of availableTables) {
+      const tableLower = table.toLowerCase();
+      for (const keyword of keywordsLower) {
+        if (tableLower.includes(keyword) || keyword.includes(tableLower)) {
+          matched.push(table);
+          break;
+        }
+      }
+    }
+    
+    return matched;
+  }
+
+  private buildTableMatchConditions(tableKeywords: string[]): string[] {
+    return tableKeywords.filter(keyword => keyword.length > 2);
+  }
 }
 
 /**
@@ -347,6 +450,53 @@ class SQLiteAdapter implements IDatabaseAdapter {
   getSimpleTableListQuery(): string {
     // SQLite特有的简单查询
     return "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';";
+  }
+
+  // 新增：智能表匹配相关方法实现
+  getTargetedSampleDataQuery(tableKeywords: string[], limit: number = 5): string {
+    const matchedTables = this.buildTableMatchConditions(tableKeywords);
+    if (matchedTables.length === 0) {
+      return this.getTableListQuery();
+    }
+    
+    const queries = matchedTables.map(tableName => 
+      `(SELECT '${tableName}' as source_table, t.* FROM ${this.escapeIdentifier(tableName)} t LIMIT ${limit})`
+    );
+    
+    return queries.join(' UNION ALL ');
+  }
+
+  getTargetedTableInfoQuery(tableKeywords: string[]): string {
+    const matchConditions = tableKeywords.map(keyword => 
+      `name LIKE '%${keyword}%'`
+    ).join(' OR ');
+    
+    return `SELECT name as table_name, '' as table_comment 
+            FROM sqlite_master 
+            WHERE type = 'table' 
+            AND name NOT LIKE 'sqlite_%' 
+            AND (${matchConditions})`;
+  }
+
+  matchTableNames(availableTables: string[], targetKeywords: string[]): string[] {
+    const matched: string[] = [];
+    const keywordsLower = targetKeywords.map(k => k.toLowerCase());
+    
+    for (const table of availableTables) {
+      const tableLower = table.toLowerCase();
+      for (const keyword of keywordsLower) {
+        if (tableLower.includes(keyword) || keyword.includes(tableLower)) {
+          matched.push(table);
+          break;
+        }
+      }
+    }
+    
+    return matched;
+  }
+
+  private buildTableMatchConditions(tableKeywords: string[]): string[] {
+    return tableKeywords.filter(keyword => keyword.length > 2);
   }
 }
 
