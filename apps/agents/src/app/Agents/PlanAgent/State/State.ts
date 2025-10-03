@@ -1,4 +1,35 @@
 import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
+
+/**
+ * 定义从MCP服务器获取的工具的结构
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  schema: {
+    properties: {
+      [key: string]: {
+        type: string;
+        description: string;
+        [key: string]: any; // 允许其他JSON Schema属性
+      };
+    };
+    required?: string[];
+  };
+  input_schema?: any;
+  parametersSchema?: any;
+}
+
+/**
+ * 定义批处理任务的信息结构
+ */
+export interface BatchInfo {
+  batchIndex: number;
+  totalBatches: number;
+  toolsPerBatch: number;
+  totalTools: number;
+}
+
 /**
  * PlanAgent状态注解
  * 
@@ -16,7 +47,7 @@ export const PlanAgentAnnotation = Annotation.Root({
     default: () => 0,
   }),
   // 当前正在处理的工具信息
-  currentTool: Annotation<any>({
+  currentTool: Annotation<ToolDefinition | null>({
     reducer: (x, y) => y ?? x ?? null,
     default: () => null,
   }),
@@ -31,17 +62,12 @@ export const PlanAgentAnnotation = Annotation.Root({
     default: () => [],
   }),
   // 批次信息
-  batchInfo: Annotation<{
-    batchIndex: number;
-    totalBatches: number;
-    toolsPerBatch: number;
-    totalTools: number;
-  } | null>({
+  batchInfo: Annotation<BatchInfo | null>({
     reducer: (x, y) => y ?? x ?? null,
     default: () => null,
   }),
   // 工具列表
-  toolsList: Annotation<any[]>({
+  toolsList: Annotation<ToolDefinition[]>({
     reducer: (x, y) => y ?? x ?? [],
     default: () => [],
   }),

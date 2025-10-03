@@ -11,7 +11,7 @@ import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { loadChatModel } from "../../ModelUtils/ChatModel.js";
 import { getPostgresqlHubTools, getTestServerTools } from "../../mcp-servers/mcp-client.js";
 import type { TaskPlanedForTest } from "../../Memory/SharedMemoryManager.js";
-import { PlanAgentAnnotation } from "./State/State.js";
+import { BatchInfo, PlanAgentAnnotation } from "./State/State.js";
 import { buildDataAssessmentPrompt } from "./Prompts/Prompts.js";
 import { parseJsonFromLLMResponse, parseSqlResult } from "./Utils/Utils.js";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -325,7 +325,7 @@ export class PlanAgent extends BaseAgent {
 
       console.log(`[PlanAgent] Generating plan for tool: ${currentTool.name}, Query Round: ${queryRound || 0}`);
       // 根据工具schema动态查询相关的真实数据
-      const enhancedQueryResults = await this.enhanceQueryResultsForTool(currentTool, queryResults || {});
+      const enhancedQueryResults = queryResults || {};
       // 第一步：LLM评估数据充分性
       const dataAssessment = await this.assessDataSufficiency(currentTool, enhancedQueryResults, queryRound || 0);
       console.log(`[PlanAgent] Data assessment for ${currentTool.name}:`, dataAssessment);
@@ -600,188 +600,11 @@ export class PlanAgent extends BaseAgent {
   }
 
   // 根据工具schema动态查询相关的真实数据
-  private async enhanceQueryResultsForTool(
-    tool: any, 
-    baseQueryResults: Record<string, any>
-  ): Promise<Record<string, any>> {
-    console.log(`[PlanAgent] Enhancing query results for tool: ${tool.name}`);
-    
-    try {
-      const enhancedResults = { ...baseQueryResults };
-      const toolSchema = tool?.schema ?? tool?.input_schema ?? tool?.parametersSchema ?? {};
-      const properties = toolSchema.properties || {};
-      
-      // 获取数据库工具
-      const dbTools = await getPostgresqlHubTools();
-      const sqlTool = dbTools?.find(t => t.name === 'execute_sql');
-      
-      if (!sqlTool) {
-        console.warn('[PlanAgent] No SQL tool available for enhanced queries');
-        return enhancedResults;
-      }
-
-      // 分析工具参数，识别需要的数据类型
-      const dataNeeds = this.analyzeToolDataNeeds(properties);
-      console.log(`[PlanAgent] Identified data needs for ${tool.name}:`, dataNeeds);
-      
-      // 根据数据需求执行相应的SQL查询
-      for (const need of dataNeeds) {
-        try {
-          const query = this.buildTargetedQuery(need, baseQueryResults);
-          if (query) {
-            console.log(`[PlanAgent] Executing targeted query for ${need.type}:`, query);
-            const result = await sqlTool.call({ sql: query });
-            const parsedResult = parseSqlResult(result);
-            enhancedResults[`targeted_${need.type}`] = parsedResult;
-            console.log(`[PlanAgent] Enhanced data for ${need.type}:`, {
-              resultType: typeof result,
-              isArray: Array.isArray(result),
-              length: Array.isArray(result) ? result.length : 'N/A'
-            });
-          }
-        } catch (error) {
-          console.warn(`[PlanAgent] Failed to get enhanced data for ${need.type}:`, error);
-          enhancedResults[`targeted_${need.type}_error`] = error instanceof Error ? error.message : String(error);
-        }
-      }
-      
-      return enhancedResults;
-    } catch (error) {
-      console.error('[PlanAgent] Error enhancing query results:', error);
-      return baseQueryResults;
-    }
-  }
-
-  // 分析工具参数，识别需要的数据类型
-  private analyzeToolDataNeeds(properties: Record<string, any>): Array<{type: string, field: string, description?: string}> {
-    const dataNeeds: Array<{type: string, field: string, description?: string}> = [];
-    
-    for (const [fieldName, fieldSchema] of Object.entries(properties)) {
-      const fieldType = (fieldSchema as any)?.type;
-      const fieldDescription = (fieldSchema as any)?.description || '';
-      const lowerField = fieldName.toLowerCase();
-      const lowerDesc = fieldDescription.toLowerCase();
-      
-      // 识别用户相关数据
-      if (lowerField.includes('user') || lowerField.includes('customer') || 
-          lowerDesc.includes('user') || lowerDesc.includes('customer')) {
-        dataNeeds.push({ type: 'users', field: fieldName, description: fieldDescription });
-      }
-      
-      // 识别订单相关数据
-      if (lowerField.includes('order') || lowerField.includes('purchase') || 
-          lowerDesc.includes('order') || lowerDesc.includes('purchase')) {
-        dataNeeds.push({ type: 'orders', field: fieldName, description: fieldDescription });
-      }
-      
-      // 识别产品相关数据
-      if (lowerField.includes('product') || lowerField.includes('item') || 
-          lowerDesc.includes('product') || lowerDesc.includes('item')) {
-        dataNeeds.push({ type: 'products', field: fieldName, description: fieldDescription });
-      }
-      
-      // 识别支付相关数据
-      if (lowerField.includes('payment') || lowerField.includes('transaction') || 
-          lowerDesc.includes('payment') || lowerDesc.includes('transaction')) {
-        dataNeeds.push({ type: 'payments', field: fieldName, description: fieldDescription });
-      }
-      
-      // 识别ID类型字段
-      if (fieldType === 'integer' || fieldType === 'number') {
-        if (lowerField.includes('id') && !dataNeeds.some(need => need.field === fieldName)) {
-          // 根据ID字段名推断数据类型
-          if (lowerField.includes('user')) {
-            dataNeeds.push({ type: 'users', field: fieldName, description: fieldDescription });
-          } else if (lowerField.includes('order')) {
-            dataNeeds.push({ type: 'orders', field: fieldName, description: fieldDescription });
-          } else if (lowerField.includes('product')) {
-            dataNeeds.push({ type: 'products', field: fieldName, description: fieldDescription });
-          }
-        }
-      }
-    }
-    
-    // 去重
-    const uniqueNeeds = dataNeeds.filter((need, index, self) => 
-      index === self.findIndex(n => n.type === need.type)
-    );
-    
-    return uniqueNeeds;
-  }
-
-  // 根据数据需求构建目标SQL查询
-  private buildTargetedQuery(need: {type: string, field: string, description?: string}, baseResults: Record<string, any>): string | null {
-    const tables = baseResults.tables;
-    if (!Array.isArray(tables)) {
-      return null;
-    }
-    
-    // 查找匹配的表名
-    const matchingTable = tables.find((tableRow: any) => {
-      const tableName = (tableRow.table_name || tableRow.TABLE_NAME || '').toLowerCase();
-      return tableName.includes(need.type.slice(0, -1)) || // 去掉复数s
-             tableName.includes(need.type) ||
-             (need.type === 'users' && (tableName.includes('user') || tableName.includes('customer'))) ||
-             (need.type === 'orders' && (tableName.includes('order') || tableName.includes('purchase'))) ||
-             (need.type === 'products' && (tableName.includes('product') || tableName.includes('item'))) ||
-             (need.type === 'payments' && (tableName.includes('payment') || tableName.includes('transaction')));
-    });
-    
-    if (!matchingTable) {
-      console.log(`[PlanAgent] No matching table found for data type: ${need.type}`);
-      return null;
-    }
-    
-    const tableName = matchingTable.table_name || matchingTable.TABLE_NAME;
-    
-    try {
-      // 使用数据库适配器构建查询
-      const dbAdapter = getDatabaseAdapter();
-      let orderByColumn = '';
-      
-      // 检查是否有列信息来确定排序字段
-      if (baseResults.columns && Array.isArray(baseResults.columns)) {
-        const tableColumns = baseResults.columns.filter((col: any) => 
-          (col.table_name || col.TABLE_NAME || '').toLowerCase() === tableName.toLowerCase()
-        );
-        
-        // 查找id相关字段
-        const idColumn = tableColumns.find((col: any) => {
-          const colName = (col.column_name || col.COLUMN_NAME || '').toLowerCase();
-          return colName === 'id' || colName.endsWith('_id') || colName === 'uuid';
-        });
-        
-        if (idColumn) {
-          orderByColumn = idColumn.column_name || idColumn.COLUMN_NAME;
-        } else {
-          // 如果没有id字段，尝试使用第一个字段
-          if (tableColumns.length > 0) {
-            orderByColumn = tableColumns[0].column_name || tableColumns[0].COLUMN_NAME;
-          }
-        }
-      } else {
-        // 如果没有列信息，尝试使用常见的id字段名
-        orderByColumn = 'id';
-      }
-      
-      // 使用数据库适配器生成查询
-      const query = dbAdapter.getSampleDataQueryWithOrder(tableName, 10, orderByColumn, 'DESC');
-      console.log(`[PlanAgent] Built targeted query for ${need.type}: ${query}`);
-      return query;
-      
-    } catch (error) {
-      console.error(`[PlanAgent] Error building targeted query for ${need.type}:`, error);
-      // 降级到最简单的查询
-      const dbAdapter = getDatabaseAdapter();
-      return dbAdapter.getSampleDataQuery(tableName, 10);
-    }
-  }
-
   // 构建单个工具的提示词
   private buildSingleToolPrompt(
     tool: any, 
     queryResults: Record<string, any>, 
-    batchInfo: any, 
+    batchInfo: BatchInfo | null, 
     toolIndex: number
   ): string {
     const toolSchema = tool?.schema ?? tool?.input_schema ?? tool?.parametersSchema ?? {};
@@ -1147,7 +970,7 @@ Example output format (using real database values):
       );
 
     return builder.compile({
-      checkpointer: this.memoryManager.getCheckpointer(),
+      // checkpointer: this.memoryManager.getCheckpointer(),
       // store 配置通过 LangGraph 运行时传递
       interruptBefore: [],
       interruptAfter: [],

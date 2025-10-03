@@ -973,7 +973,7 @@ export class ExecuteTestAgent extends BaseAgent {
       )
       .addEdge("llm-evaluate-node", "execute-test-node")
       .compile({
-        checkpointer: this.memoryManager.getCheckpointer(),
+        // checkpointer: this.memoryManager.getCheckpointer(),
         interruptBefore: [],
         interruptAfter: [],
       }).withConfig({ recursionLimit: 256 });

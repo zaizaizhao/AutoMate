@@ -26,9 +26,9 @@ function sanitizeDbUrl(raw?: string): string {
 }
 
 // 配置日志级别以抑制LangChain token警告
-process.env.LANGCHAIN_VERBOSE = "false";
-process.env.LANGCHAIN_CALLBACKS_BACKGROUND = "false";
-process.env.LANGCHAIN_TRACING_V2 = "false";
+// process.env.LANGCHAIN_VERBOSE = "false";
+// process.env.LANGCHAIN_CALLBACKS_BACKGROUND = "false";
+// process.env.LANGCHAIN_TRACING_V2 = "false";
 
 // 抑制特定的警告日志
 const originalConsoleWarn = console.warn;
@@ -106,12 +106,4 @@ export const graph = workflow
     checkpointer: memoryManager.getCheckpointer(),
   })
   .withConfig({ recursionLimit: 256 });
-// 为LangGraph checkpointer提供thread_id，用于标识会话和存储检查点
-// const threadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-// await graph.invoke({}, { 
-//   recursionLimit: 100,
-//   configurable: {
-//     thread_id: threadId
-//   }
-// })
 graph.name = "agent";
